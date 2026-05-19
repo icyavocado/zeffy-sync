@@ -32,6 +32,7 @@ add_action('admin_menu', 'zeffy_sync_register_admin_menu');
 add_action('admin_init', 'zeffy_sync_register_settings');
 add_action('admin_post_zeffy_sync_run_now', 'zeffy_sync_handle_run_now');
 add_filter('pre_set_site_transient_update_plugins', 'zeffy_sync_maybe_set_plugin_update');
+add_filter('site_transient_update_plugins', 'zeffy_sync_maybe_set_plugin_update');
 add_filter('plugins_api', 'zeffy_sync_plugin_information', 10, 3);
 
 function zeffy_sync_activate(): void
@@ -344,7 +345,7 @@ function zeffy_sync_render_settings_page(): void
                 <tr>
                     <th scope="row"><label for="zeffy-sync-api-key">Zeffy API Key</label></th>
                     <td>
-                        <input id="zeffy-sync-api-key" name="<?php echo esc_attr(ZEFFY_SYNC_SETTINGS_OPTION); ?>[api_key]" type="password" class="regular-text" value="<?php echo esc_attr($settings['api_key']); ?>" autocomplete="off" />
+                        <input id="zeffy-sync-api-key" name="<?php echo esc_attr(ZEFFY_SYNC_SETTINGS_OPTION); ?>[api_key]" type="password" class="regular-text" value="<?php echo esc_attr($settings['api_key']); ?>" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false" />
                         <p class="description">Used for the Zeffy campaigns API request.</p>
                     </td>
                 </tr>
@@ -482,6 +483,7 @@ function zeffy_sync_maybe_set_plugin_update($transient)
     }
 
     $transient->response[$plugin_file] = (object) [
+        'id' => 'https://github.com/' . ZEFFY_SYNC_GITHUB_REPO,
         'slug' => 'zeffy-sync',
         'plugin' => $plugin_file,
         'new_version' => $release['version'],
@@ -495,12 +497,12 @@ function zeffy_sync_maybe_set_plugin_update($transient)
 /**
  * @param mixed $result
  * @param string $action
- * @param object $args
+ * @param mixed $args
  * @return mixed
  */
-function zeffy_sync_plugin_information($result, string $action, object $args)
+function zeffy_sync_plugin_information($result, string $action, $args)
 {
-    if ($action !== 'plugin_information' || !isset($args->slug) || $args->slug !== 'zeffy-sync') {
+    if (!is_object($args) || $action !== 'plugin_information' || !isset($args->slug) || $args->slug !== 'zeffy-sync') {
         return $result;
     }
 
@@ -1098,7 +1100,7 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
     // Extra meta fields
     $zeffy_url = (isset($campaign['url']) && is_string($campaign['url'])) ? $campaign['url'] : '';
     $campaign_type = (isset($campaign['type']) && is_string($campaign['type'])) ? $campaign['type'] : '';
-    $campaign_category = (isset($campaign['category']) && is_string($campaign['category'])) ? trim($campaign['category']) : '';
+    $campaign_category = zeffy_sync_normalize_campaign_category($campaign);
     $banner_url = (isset($campaign['banner_url']) && is_string($campaign['banner_url'])) ? $campaign['banner_url'] : '';
 
     if (!isset(zeffy_sync_campaign_category_map()[$campaign_category])) {
@@ -1117,10 +1119,8 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
             if (!is_array($occurrence)) {
                 continue;
             }
-            $occ_start = isset($occurrence['start_date']) && is_numeric($occurrence['start_date'])
-                ? (int) $occurrence['start_date'] : null;
-            $occ_end = isset($occurrence['end_date']) && is_numeric($occurrence['end_date'])
-                ? (int) $occurrence['end_date'] : null;
+            $occ_start = zeffy_sync_normalize_unix_timestamp($occurrence['start_date'] ?? null);
+            $occ_end = zeffy_sync_normalize_unix_timestamp($occurrence['end_date'] ?? null);
             if ($occ_start !== null && ($start_date === null || $occ_start < $start_date)) {
                 $start_date = $occ_start;
             }
@@ -1130,11 +1130,11 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
         }
     }
     // Fall back to campaign-level start_date/end_date if no occurrences
-    if ($start_date === null && isset($campaign['start_date']) && is_numeric($campaign['start_date'])) {
-        $start_date = (int) $campaign['start_date'];
+    if ($start_date === null) {
+        $start_date = zeffy_sync_normalize_unix_timestamp($campaign['start_date'] ?? null);
     }
-    if ($end_date === null && isset($campaign['end_date']) && is_numeric($campaign['end_date'])) {
-        $end_date = (int) $campaign['end_date'];
+    if ($end_date === null) {
+        $end_date = zeffy_sync_normalize_unix_timestamp($campaign['end_date'] ?? null);
     }
 
     return [
@@ -1149,6 +1149,78 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
         'start_date'    => $start_date,
         'end_date'      => $end_date,
     ];
+}
+
+/**
+ * @param array<string, mixed> $campaign
+ */
+function zeffy_sync_normalize_campaign_category(array $campaign): string
+{
+    $campaign_map = zeffy_sync_campaign_category_map();
+    $aliases = [
+        'event' => 'Event',
+        'events' => 'Event',
+        'donation' => 'DonationForm',
+        'donations' => 'DonationForm',
+        'donationform' => 'DonationForm',
+        'membership' => 'MembershipV2',
+        'membershipv2' => 'MembershipV2',
+    ];
+
+    $candidates = [
+        $campaign['category'] ?? null,
+        $campaign['campaign_category'] ?? null,
+        $campaign['type'] ?? null,
+        $campaign['campaign_type'] ?? null,
+    ];
+    foreach ($candidates as $candidate) {
+        if (!is_scalar($candidate)) {
+            continue;
+        }
+        $value = trim((string) $candidate);
+        if ($value === '') {
+            continue;
+        }
+
+        if (isset($campaign_map[$value])) {
+            return $value;
+        }
+
+        $normalized = strtolower(str_replace([' ', '-', '_'], '', $value));
+        if (isset($aliases[$normalized])) {
+            return $aliases[$normalized];
+        }
+    }
+
+    return '';
+}
+
+/**
+ * @param mixed $value
+ */
+function zeffy_sync_normalize_unix_timestamp($value): ?int
+{
+    if ($value === null) {
+        return null;
+    }
+
+    if (is_numeric($value)) {
+        $timestamp = (int) $value;
+        if ($timestamp > 9999999999) {
+            $timestamp = (int) floor($timestamp / 1000);
+        }
+
+        return ($timestamp > 0) ? $timestamp : null;
+    }
+
+    if (is_string($value)) {
+        $parsed = strtotime($value);
+        if ($parsed !== false && $parsed > 0) {
+            return $parsed;
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -1215,7 +1287,12 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
         }
 
         zeffy_sync_write_post_meta((int) $post_id, $normalized);
-        zeffy_sync_sync_campaign_terms((int) $post_id, (string) $normalized['campaign_category']);
+        zeffy_sync_sync_campaign_terms(
+            (int) $post_id,
+            (string) $normalized['campaign_category'],
+            isset($normalized['start_date']) && is_int($normalized['start_date']) ? $normalized['start_date'] : null,
+            isset($normalized['end_date']) && is_int($normalized['end_date']) ? $normalized['end_date'] : null
+        );
         zeffy_sync_set_featured_image_from_url((int) $post_id, (string) $normalized['banner_url'], (string) $normalized['title']);
         return 'updated';
     }
@@ -1226,7 +1303,12 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
     }
 
     zeffy_sync_write_post_meta((int) $post_id, $normalized);
-    zeffy_sync_sync_campaign_terms((int) $post_id, (string) $normalized['campaign_category']);
+    zeffy_sync_sync_campaign_terms(
+        (int) $post_id,
+        (string) $normalized['campaign_category'],
+        isset($normalized['start_date']) && is_int($normalized['start_date']) ? $normalized['start_date'] : null,
+        isset($normalized['end_date']) && is_int($normalized['end_date']) ? $normalized['end_date'] : null
+    );
     zeffy_sync_set_featured_image_from_url((int) $post_id, (string) $normalized['banner_url'], (string) $normalized['title']);
     return 'created';
 }
@@ -1273,7 +1355,7 @@ function zeffy_sync_write_post_meta(int $post_id, array $normalized): void
     }
 }
 
-function zeffy_sync_sync_campaign_terms(int $post_id, string $campaign_category): void
+function zeffy_sync_sync_campaign_terms(int $post_id, string $campaign_category, ?int $start_date = null, ?int $end_date = null): void
 {
     $campaign_map = zeffy_sync_campaign_category_map();
     if (!isset($campaign_map[$campaign_category])) {
@@ -1300,13 +1382,40 @@ function zeffy_sync_sync_campaign_terms(int $post_id, string $campaign_category)
 
     if (taxonomy_exists('category') && is_object_in_taxonomy($post_type, 'category')) {
         wp_remove_object_terms($post_id, $known_category_terms, 'category');
-        wp_set_object_terms($post_id, [$campaign_map[$campaign_category]['category']], 'category', true);
+        wp_set_object_terms($post_id, [$campaign_map[$campaign_category]['category']], 'category', false);
     }
 
     if (taxonomy_exists('post_tag') && is_object_in_taxonomy($post_type, 'post_tag')) {
+        $lifecycle_tags = zeffy_sync_calculate_lifecycle_tags($start_date, $end_date);
+        $known_lifecycle_tags = ['Active', 'Ongoing', 'Ended'];
         wp_remove_object_terms($post_id, $known_tag_terms, 'post_tag');
+        wp_remove_object_terms($post_id, $known_lifecycle_tags, 'post_tag');
         wp_set_object_terms($post_id, [$campaign_map[$campaign_category]['tag']], 'post_tag', true);
+        if (!empty($lifecycle_tags)) {
+            wp_set_object_terms($post_id, $lifecycle_tags, 'post_tag', true);
+        }
     }
+}
+
+/**
+ * @return array<int, string>
+ */
+function zeffy_sync_calculate_lifecycle_tags(?int $start_date, ?int $end_date): array
+{
+    if ($start_date === null && $end_date === null) {
+        return [];
+    }
+
+    $now = (int) current_time('timestamp', true);
+    if ($end_date !== null && $now > $end_date) {
+        return ['Ended'];
+    }
+
+    if ($start_date !== null && $now < $start_date) {
+        return ['Active'];
+    }
+
+    return ['Active', 'Ongoing'];
 }
 
 function zeffy_sync_set_featured_image_from_url(int $post_id, string $banner_url, string $title = ''): void
