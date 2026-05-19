@@ -1078,11 +1078,7 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
         $campaign['name'] ?? null,
         'Zeffy event ' . $campaign_id
     );
-    $content = zeffy_sync_first_non_empty(
-        $campaign['description'] ?? null,
-        $campaign['details'] ?? null,
-        $campaign['summary'] ?? null
-    );
+    $content = zeffy_sync_extract_campaign_content($campaign);
 
     // Map API status to WordPress status
     $api_status = isset($campaign['status']) ? (string) $campaign['status'] : '';
@@ -1098,7 +1094,7 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
     }
 
     // Extra meta fields
-    $zeffy_url = (isset($campaign['url']) && is_string($campaign['url'])) ? $campaign['url'] : '';
+    $zeffy_url = zeffy_sync_normalize_campaign_url($campaign);
     $campaign_type = (isset($campaign['type']) && is_string($campaign['type'])) ? $campaign['type'] : '';
     $campaign_category = zeffy_sync_normalize_campaign_category($campaign);
     $banner_url = (isset($campaign['banner_url']) && is_string($campaign['banner_url'])) ? $campaign['banner_url'] : '';
@@ -1111,11 +1107,19 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
         );
     }
 
-    // Compute start/end from occurrences
+    // Compute start/end from occurrences (prefer non-archived occurrences).
     $start_date = null;
     $end_date = null;
     if (isset($campaign['occurrences']) && is_array($campaign['occurrences'])) {
-        foreach ($campaign['occurrences'] as $occurrence) {
+        $occurrences = $campaign['occurrences'];
+        $active_occurrences = array_values(array_filter($occurrences, static function ($occurrence): bool {
+            return is_array($occurrence) && empty($occurrence['is_archived']);
+        }));
+        if (!empty($active_occurrences)) {
+            $occurrences = $active_occurrences;
+        }
+
+        foreach ($occurrences as $occurrence) {
             if (!is_array($occurrence)) {
                 continue;
             }
@@ -1142,12 +1146,15 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
         'title'         => sanitize_text_field($title),
         'content'       => wp_kses_post($content),
         'status'        => $status,
+        'api_status'    => sanitize_key($api_status),
+        'is_archived'   => !empty($campaign['is_archived']),
         'zeffy_url'     => esc_url_raw($zeffy_url),
         'campaign_type' => sanitize_text_field($campaign_type),
         'campaign_category' => sanitize_text_field($campaign_category),
         'banner_url'    => esc_url_raw($banner_url),
         'start_date'    => $start_date,
         'end_date'      => $end_date,
+        'raw_campaign'  => $campaign,
     ];
 }
 
@@ -1193,6 +1200,98 @@ function zeffy_sync_normalize_campaign_category(array $campaign): string
     }
 
     return '';
+}
+
+/**
+ * @param array<string, mixed> $campaign
+ */
+function zeffy_sync_extract_campaign_content(array $campaign): string
+{
+    return zeffy_sync_first_non_empty(
+        $campaign['description'] ?? null,
+        $campaign['details'] ?? null,
+        $campaign['summary'] ?? null,
+        $campaign['content'] ?? null,
+        $campaign['body'] ?? null,
+        $campaign['long_description'] ?? null,
+        $campaign['excerpt'] ?? null
+    );
+}
+
+/**
+ * @param array<string, mixed> $campaign
+ */
+function zeffy_sync_normalize_campaign_url(array $campaign): string
+{
+    $source_url = (isset($campaign['url']) && is_string($campaign['url'])) ? trim($campaign['url']) : '';
+    if ($source_url === '') {
+        return '';
+    }
+
+    $parsed = wp_parse_url($source_url);
+    if (!is_array($parsed)) {
+        return $source_url;
+    }
+
+    $host = isset($parsed['host']) ? strtolower((string) $parsed['host']) : '';
+    if ($host === '') {
+        return $source_url;
+    }
+
+    $path = isset($parsed['path']) ? trim((string) $parsed['path'], '/') : '';
+    if ($path === '') {
+        return $source_url;
+    }
+
+    $segments = array_values(array_filter(explode('/', $path), static function ($segment): bool {
+        return $segment !== '';
+    }));
+    $slug = end($segments);
+    if (!is_string($slug) || $slug === '') {
+        return $source_url;
+    }
+
+    $campaign_category = zeffy_sync_normalize_campaign_category($campaign);
+    $path_type = '';
+    if ($campaign_category === 'Event') {
+        $path_type = 'ticketing';
+    } elseif ($campaign_category === 'DonationForm') {
+        $path_type = 'donation';
+    } elseif ($campaign_category === 'MembershipV2') {
+        $path_type = 'membership';
+    }
+    if ($path_type === '') {
+        return $source_url;
+    }
+
+    $locale = (isset($campaign['locale']) && is_string($campaign['locale'])) ? trim($campaign['locale']) : '';
+    $currency = (isset($campaign['currency']) && is_string($campaign['currency'])) ? trim($campaign['currency']) : '';
+    $locale_segment = zeffy_sync_map_locale_for_url($locale, $currency);
+
+    return sprintf('https://www.zeffy.com/%s/%s/%s', $locale_segment, $path_type, rawurlencode($slug));
+}
+
+function zeffy_sync_map_locale_for_url(string $locale, string $currency): string
+{
+    $locale = strtoupper($locale);
+    $currency = strtolower($currency);
+
+    if ($currency === 'cad') {
+        if ($locale === 'FR') {
+            return 'fr-CA';
+        }
+        return 'en-CA';
+    }
+
+    if ($locale === 'FR') {
+        return 'fr';
+    }
+    if ($locale === 'EN') {
+        return 'en';
+    }
+
+    $normalized = trim(strtolower(str_replace('_', '-', $locale)));
+    return ($normalized !== '') ? $normalized : 'en';
 }
 
 /**
@@ -1280,6 +1379,13 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
             return 'skipped';
         }
 
+        if ($postarr['post_content'] === '') {
+            $existing_post = get_post($existing_id);
+            if ($existing_post instanceof WP_Post && is_string($existing_post->post_content)) {
+                $postarr['post_content'] = $existing_post->post_content;
+            }
+        }
+
         $postarr['ID'] = $existing_id;
         $post_id = wp_update_post($postarr, true);
         if (is_wp_error($post_id)) {
@@ -1291,7 +1397,9 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
             (int) $post_id,
             (string) $normalized['campaign_category'],
             isset($normalized['start_date']) && is_int($normalized['start_date']) ? $normalized['start_date'] : null,
-            isset($normalized['end_date']) && is_int($normalized['end_date']) ? $normalized['end_date'] : null
+            isset($normalized['end_date']) && is_int($normalized['end_date']) ? $normalized['end_date'] : null,
+            isset($normalized['api_status']) && is_string($normalized['api_status']) ? $normalized['api_status'] : '',
+            !empty($normalized['is_archived'])
         );
         zeffy_sync_set_featured_image_from_url((int) $post_id, (string) $normalized['banner_url'], (string) $normalized['title']);
         return 'updated';
@@ -1307,7 +1415,9 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
         (int) $post_id,
         (string) $normalized['campaign_category'],
         isset($normalized['start_date']) && is_int($normalized['start_date']) ? $normalized['start_date'] : null,
-        isset($normalized['end_date']) && is_int($normalized['end_date']) ? $normalized['end_date'] : null
+        isset($normalized['end_date']) && is_int($normalized['end_date']) ? $normalized['end_date'] : null,
+        isset($normalized['api_status']) && is_string($normalized['api_status']) ? $normalized['api_status'] : '',
+        !empty($normalized['is_archived'])
     );
     zeffy_sync_set_featured_image_from_url((int) $post_id, (string) $normalized['banner_url'], (string) $normalized['title']);
     return 'created';
@@ -1334,6 +1444,14 @@ function zeffy_sync_write_post_meta(int $post_id, array $normalized): void
         update_post_meta($post_id, '_zeffy_campaign_type', $normalized['campaign_type']);
     }
 
+    if (isset($normalized['api_status']) && $normalized['api_status'] !== '') {
+        update_post_meta($post_id, '_zeffy_api_status', $normalized['api_status']);
+    }
+
+    if (array_key_exists('is_archived', $normalized)) {
+        update_post_meta($post_id, '_zeffy_is_archived', !empty($normalized['is_archived']) ? 1 : 0);
+    }
+
     if (isset($normalized['campaign_category']) && $normalized['campaign_category'] !== '') {
         update_post_meta($post_id, '_zeffy_campaign_category', $normalized['campaign_category']);
     }
@@ -1353,9 +1471,57 @@ function zeffy_sync_write_post_meta(int $post_id, array $normalized): void
     if (isset($normalized['end_date']) && $normalized['end_date'] !== null) {
         update_post_meta($post_id, '_zeffy_end_date', (int) $normalized['end_date']);
     }
+
+    if (isset($normalized['raw_campaign']) && is_array($normalized['raw_campaign'])) {
+        zeffy_sync_write_raw_campaign_meta($post_id, $normalized['raw_campaign']);
+    }
 }
 
-function zeffy_sync_sync_campaign_terms(int $post_id, string $campaign_category, ?int $start_date = null, ?int $end_date = null): void
+/**
+ * @param array<string, mixed> $campaign
+ */
+function zeffy_sync_write_raw_campaign_meta(int $post_id, array $campaign): void
+{
+    $campaign_json = wp_json_encode($campaign, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if (is_string($campaign_json)) {
+        update_post_meta($post_id, '_zeffy_campaign_json', $campaign_json);
+    }
+
+    foreach ($campaign as $key => $value) {
+        if (!is_string($key) || $key === '') {
+            continue;
+        }
+
+        $meta_key = '_zeffy_raw_' . sanitize_key($key);
+        if ($meta_key === '_zeffy_raw_') {
+            continue;
+        }
+
+        if ($value === null) {
+            delete_post_meta($post_id, $meta_key);
+            continue;
+        }
+
+        if (is_scalar($value)) {
+            update_post_meta($post_id, $meta_key, $value);
+            continue;
+        }
+
+        $encoded = wp_json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (is_string($encoded)) {
+            update_post_meta($post_id, $meta_key, $encoded);
+        }
+    }
+}
+
+function zeffy_sync_sync_campaign_terms(
+    int $post_id,
+    string $campaign_category,
+    ?int $start_date = null,
+    ?int $end_date = null,
+    string $api_status = '',
+    bool $is_archived = false
+): void
 {
     $campaign_map = zeffy_sync_campaign_category_map();
     if (!isset($campaign_map[$campaign_category])) {
@@ -1386,7 +1552,7 @@ function zeffy_sync_sync_campaign_terms(int $post_id, string $campaign_category,
     }
 
     if (taxonomy_exists('post_tag') && is_object_in_taxonomy($post_type, 'post_tag')) {
-        $lifecycle_tags = zeffy_sync_calculate_lifecycle_tags($start_date, $end_date);
+        $lifecycle_tags = zeffy_sync_calculate_lifecycle_tags($start_date, $end_date, $api_status, $is_archived);
         $known_lifecycle_tags = ['Active', 'Ongoing', 'Ended'];
         wp_remove_object_terms($post_id, $known_tag_terms, 'post_tag');
         wp_remove_object_terms($post_id, $known_lifecycle_tags, 'post_tag');
@@ -1400,14 +1566,25 @@ function zeffy_sync_sync_campaign_terms(int $post_id, string $campaign_category,
 /**
  * @return array<int, string>
  */
-function zeffy_sync_calculate_lifecycle_tags(?int $start_date, ?int $end_date): array
+function zeffy_sync_calculate_lifecycle_tags(
+    ?int $start_date,
+    ?int $end_date,
+    string $api_status = '',
+    bool $is_archived = false
+): array
 {
     if ($start_date === null && $end_date === null) {
+        if (!$is_archived && strtolower($api_status) === 'active') {
+            return ['Active', 'Ongoing'];
+        }
         return [];
     }
 
     $now = (int) current_time('timestamp', true);
     if ($end_date !== null && $now > $end_date) {
+        if (!$is_archived && strtolower($api_status) === 'active') {
+            return ['Active', 'Ongoing'];
+        }
         return ['Ended'];
     }
 
