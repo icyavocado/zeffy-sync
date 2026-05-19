@@ -17,6 +17,7 @@ const ZEFFY_SYNC_DEFAULT_ENDPOINT = 'https://api.zeffy.com/api/v1/campaigns';
 const ZEFFY_SYNC_UPDATE_TRANSIENT = 'zeffy_sync_latest_release';
 const ZEFFY_SYNC_GITHUB_REPO = 'icyavocado/zeffy-sync';
 const ZEFFY_SYNC_GITHUB_RELEASES_API = 'https://api.github.com/repos/' . ZEFFY_SYNC_GITHUB_REPO . '/releases/latest';
+const ZEFFY_SYNC_GITHUB_RELEASES_LIST_API = 'https://api.github.com/repos/' . ZEFFY_SYNC_GITHUB_REPO . '/releases?per_page=20';
 const ZEFFY_SYNC_LOG_OPTION = 'zeffy_sync_detailed_log';
 const ZEFFY_SYNC_LOG_MAX_ENTRIES = 200;
 const ZEFFY_SYNC_LOG_MAX_RESPONSE_BODY = 4000;
@@ -455,27 +456,81 @@ function zeffy_sync_get_latest_release(): ?array
         return $cached;
     }
 
-    $response = wp_remote_get(
-        ZEFFY_SYNC_GITHUB_RELEASES_API,
-        [
-            'headers' => [
-                'Accept' => 'application/vnd.github+json',
-                'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url('/'),
-            ],
-            'timeout' => 20,
-        ]
-    );
-    if (is_wp_error($response)) {
+    $release = zeffy_sync_fetch_release_from_github();
+    if (!is_array($release)) {
         return null;
     }
 
-    $status = (int) wp_remote_retrieve_response_code($response);
-    if ($status < 200 || $status >= 300) {
+    set_transient(ZEFFY_SYNC_UPDATE_TRANSIENT, $release, HOUR_IN_SECONDS);
+    return $release;
+}
+
+/**
+ * @return array<string, string>|null
+ */
+function zeffy_sync_fetch_release_from_github(): ?array
+{
+    $request_args = [
+        'headers' => [
+            'Accept' => 'application/vnd.github+json',
+            'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url('/'),
+        ],
+        'timeout' => 20,
+    ];
+
+    $latest_response = wp_remote_get(ZEFFY_SYNC_GITHUB_RELEASES_API, $request_args);
+    if (!is_wp_error($latest_response)) {
+        $status = (int) wp_remote_retrieve_response_code($latest_response);
+        if ($status >= 200 && $status < 300) {
+            $latest_data = json_decode((string) wp_remote_retrieve_body($latest_response), true);
+            $latest_release = zeffy_sync_normalize_github_release($latest_data);
+            if (is_array($latest_release)) {
+                return $latest_release;
+            }
+        }
+    }
+
+    $list_response = wp_remote_get(ZEFFY_SYNC_GITHUB_RELEASES_LIST_API, $request_args);
+    if (is_wp_error($list_response)) {
         return null;
     }
 
-    $data = json_decode((string) wp_remote_retrieve_body($response), true);
+    $list_status = (int) wp_remote_retrieve_response_code($list_response);
+    if ($list_status < 200 || $list_status >= 300) {
+        return null;
+    }
+
+    $list_data = json_decode((string) wp_remote_retrieve_body($list_response), true);
+    if (!is_array($list_data)) {
+        return null;
+    }
+
+    $best_release = null;
+    foreach ($list_data as $release_data) {
+        $candidate = zeffy_sync_normalize_github_release($release_data);
+        if (!is_array($candidate)) {
+            continue;
+        }
+
+        if ($best_release === null || version_compare($candidate['version'], $best_release['version'], '>')) {
+            $best_release = $candidate;
+        }
+    }
+
+    return $best_release;
+}
+
+/**
+ * @param mixed $data
+ * @return array<string, string>|null
+ */
+function zeffy_sync_normalize_github_release($data): ?array
+{
     if (!is_array($data) || !isset($data['tag_name'], $data['html_url'])) {
+        return null;
+    }
+
+    if (!empty($data['draft']) || !empty($data['prerelease'])) {
         return null;
     }
 
@@ -507,14 +562,11 @@ function zeffy_sync_get_latest_release(): ?array
         return null;
     }
 
-    $release = [
+    return [
         'version' => $version,
         'download_url' => esc_url_raw($download_url),
         'html_url' => esc_url_raw((string) $data['html_url']),
     ];
-
-    set_transient(ZEFFY_SYNC_UPDATE_TRANSIENT, $release, HOUR_IN_SECONDS);
-    return $release;
 }
 
 function zeffy_sync_get_installed_version(): string
