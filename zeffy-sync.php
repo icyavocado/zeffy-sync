@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 const ZEFFY_SYNC_CRON_HOOK = 'zeffy_sync_run';
 const ZEFFY_SYNC_SETTINGS_OPTION = 'zeffy_sync_settings';
 const ZEFFY_SYNC_MENU_SLUG = 'zeffy-sync';
-const ZEFFY_SYNC_DEFAULT_ENDPOINT = 'https://api.zeffy.com/v1/campaigns';
+const ZEFFY_SYNC_DEFAULT_ENDPOINT = 'https://api.zeffy.com/api/v1/campaigns';
 const ZEFFY_SYNC_UPDATE_TRANSIENT = 'zeffy_sync_latest_release';
 const ZEFFY_SYNC_GITHUB_REPO = 'icyavocado/zeffy-sync';
 const ZEFFY_SYNC_GITHUB_RELEASES_API = 'https://api.github.com/repos/' . ZEFFY_SYNC_GITHUB_REPO . '/releases/latest';
@@ -692,10 +692,17 @@ function zeffy_sync_get_endpoint_candidates(string $endpoint): array
         $normalized . '/',
     ];
 
-    // Keep backward compatibility for previously saved legacy endpoint values.
-    if ($normalized === 'https://www.zeffy.com/api/v1/campaigns') {
-        $candidates[] = 'https://api.zeffy.com/v1/campaigns';
-        $candidates[] = 'https://api.zeffy.com/v1/campaigns/';
+    // Keep backward compatibility for known Zeffy host/path variants.
+    $known_campaign_endpoints = [
+        'https://api.zeffy.com/api/v1/campaigns',
+        'https://api.zeffy.com/v1/campaigns',
+        'https://www.zeffy.com/api/v1/campaigns',
+    ];
+    if (in_array($normalized, $known_campaign_endpoints, true)) {
+        foreach ($known_campaign_endpoints as $known_endpoint) {
+            $candidates[] = $known_endpoint;
+            $candidates[] = $known_endpoint . '/';
+        }
     }
 
     return array_values(array_unique($candidates));
