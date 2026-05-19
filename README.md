@@ -4,7 +4,7 @@ WordPress plugin that syncs Zeffy campaigns to WordPress posts/events.
 
 ## Zeffy source API
 
-- `GET https://www.zeffy.com/api/v1/campaigns`
+- `GET https://api.zeffy.com/v1/campaigns`
 
 ## WordPress UI setup
 
@@ -15,7 +15,7 @@ After activation, use the **Zeffy Sync** item in the WordPress admin sidebar.
 The settings page includes pre-filled defaults that you can change:
 
 - **Zeffy API Key** (credential)
-- **Zeffy Campaigns Endpoint** (default: `https://www.zeffy.com/api/v1/campaigns`)
+- **Zeffy Campaigns Endpoint** (default: `https://api.zeffy.com/v1/campaigns`)
 - **Target Post Type** (default: `post`)
 - **Default Post Status** (default: `publish`)
 - **Sync Interval** (default: `hourly`)
