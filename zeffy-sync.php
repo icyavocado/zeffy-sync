@@ -475,42 +475,68 @@ function zeffy_sync_log_sync_completed(array $summary, string $context = ''): vo
  */
 function zeffy_sync_fetch_campaigns(string $api_key, string $endpoint)
 {
-    $response = wp_remote_get(
-        $endpoint,
-        [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $api_key,
-                'Accept' => 'application/json',
-            ],
-            'timeout' => 20,
-        ]
-    );
+    $all_campaigns = [];
+    $cursor = null;
 
-    if (is_wp_error($response)) {
-        return $response;
-    }
-
-    $status = (int) wp_remote_retrieve_response_code($response);
-    if ($status < 200 || $status >= 300) {
-        return new WP_Error('zeffy_sync_http_error', 'Failed to fetch Zeffy campaigns.', ['status' => $status]);
-    }
-
-    $body = wp_remote_retrieve_body($response);
-    $decoded = json_decode($body, true);
-
-    if (is_array($decoded) && array_values($decoded) === $decoded) {
-        return zeffy_sync_extract_events($decoded);
-    }
-
-    if (is_array($decoded)) {
-        foreach (['data', 'campaigns', 'results', 'events'] as $key) {
-            if (isset($decoded[$key]) && is_array($decoded[$key])) {
-                return zeffy_sync_extract_events($decoded[$key]);
-            }
+    do {
+        $url = $endpoint;
+        if ($cursor !== null) {
+            $url = add_query_arg('starting_after', $cursor, $endpoint);
         }
-    }
 
-    return new WP_Error('zeffy_sync_invalid_response', 'Unexpected Zeffy campaigns response shape.');
+        $response = wp_remote_get(
+            $url,
+            [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $api_key,
+                    'Accept' => 'application/json',
+                ],
+                'timeout' => 20,
+            ]
+        );
+
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $status = (int) wp_remote_retrieve_response_code($response);
+        if ($status < 200 || $status >= 300) {
+            return new WP_Error('zeffy_sync_http_error', 'Failed to fetch Zeffy campaigns.', ['status' => $status]);
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $decoded = json_decode($body, true);
+
+        if (!is_array($decoded)) {
+            return new WP_Error('zeffy_sync_invalid_response', 'Unexpected Zeffy campaigns response shape.');
+        }
+
+        if (array_values($decoded) === $decoded) {
+            // Plain array response — no pagination support
+            return zeffy_sync_extract_events($decoded);
+        }
+
+        if (isset($decoded['data']) && is_array($decoded['data'])) {
+            $all_campaigns = array_merge($all_campaigns, $decoded['data']);
+            $has_more = !empty($decoded['has_more']);
+            $cursor = ($has_more && isset($decoded['next_cursor']) && is_string($decoded['next_cursor']))
+                ? $decoded['next_cursor']
+                : null;
+            if (!$has_more) {
+                break;
+            }
+        } else {
+            // Fallback: try other known keys (non-paginated APIs)
+            foreach (['campaigns', 'results', 'events'] as $key) {
+                if (isset($decoded[$key]) && is_array($decoded[$key])) {
+                    return zeffy_sync_extract_events($decoded[$key]);
+                }
+            }
+            return new WP_Error('zeffy_sync_invalid_response', 'Unexpected Zeffy campaigns response shape.');
+        }
+    } while ($cursor !== null);
+
+    return zeffy_sync_extract_events($all_campaigns);
 }
 
 /**
@@ -526,20 +552,6 @@ function zeffy_sync_extract_events(array $items): array
             continue;
         }
 
-        if (isset($item['events']) && is_array($item['events']) && array_values($item['events']) === $item['events']) {
-            $campaign_context = $item;
-            unset($campaign_context['events']);
-
-            foreach ($item['events'] as $event) {
-                if (!is_array($event)) {
-                    continue;
-                }
-
-                $events[] = array_merge($campaign_context, $event);
-            }
-            continue;
-        }
-
         $events[] = $item;
     }
 
@@ -548,7 +560,7 @@ function zeffy_sync_extract_events(array $items): array
 
 /**
  * @param array<string, mixed> $campaign
- * @return array<string, string>|WP_Error
+ * @return array<string, mixed>|WP_Error
  */
 function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
 {
@@ -560,6 +572,11 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
     );
     if ($campaign_id === '') {
         return new WP_Error('zeffy_sync_missing_campaign_id', 'Campaign is missing an ID.');
+    }
+
+    // Skip deleted campaigns
+    if (isset($campaign['deleted_at']) && $campaign['deleted_at'] !== null) {
+        return new WP_Error('zeffy_sync_deleted_campaign', 'Campaign is deleted.');
     }
 
     $title = zeffy_sync_first_non_empty(
@@ -574,14 +591,60 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
         $campaign['summary'] ?? null
     );
 
-    $status = zeffy_sync_first_non_empty($campaign['status'] ?? null, $default_status);
-    $status = in_array($status, ['publish', 'draft', 'private', 'pending'], true) ? $status : $default_status;
+    // Map API status to WordPress status
+    $api_status = isset($campaign['status']) ? (string) $campaign['status'] : '';
+    if ($api_status === 'active') {
+        $status = $default_status;
+    } else {
+        $status = 'draft';
+    }
+
+    // Archived campaigns are set to draft
+    if (!empty($campaign['is_archived'])) {
+        $status = 'draft';
+    }
+
+    // Extra meta fields
+    $zeffy_url = (isset($campaign['url']) && is_string($campaign['url'])) ? $campaign['url'] : '';
+    $campaign_type = (isset($campaign['type']) && is_string($campaign['type'])) ? $campaign['type'] : '';
+
+    // Compute start/end from occurrences
+    $start_date = null;
+    $end_date = null;
+    if (isset($campaign['occurrences']) && is_array($campaign['occurrences'])) {
+        foreach ($campaign['occurrences'] as $occurrence) {
+            if (!is_array($occurrence)) {
+                continue;
+            }
+            $occ_start = isset($occurrence['start_date']) && is_numeric($occurrence['start_date'])
+                ? (int) $occurrence['start_date'] : null;
+            $occ_end = isset($occurrence['end_date']) && is_numeric($occurrence['end_date'])
+                ? (int) $occurrence['end_date'] : null;
+            if ($occ_start !== null && ($start_date === null || $occ_start < $start_date)) {
+                $start_date = $occ_start;
+            }
+            if ($occ_end !== null && ($end_date === null || $occ_end > $end_date)) {
+                $end_date = $occ_end;
+            }
+        }
+    }
+    // Fall back to campaign-level start_date/end_date if no occurrences
+    if ($start_date === null && isset($campaign['start_date']) && is_numeric($campaign['start_date'])) {
+        $start_date = (int) $campaign['start_date'];
+    }
+    if ($end_date === null && isset($campaign['end_date']) && is_numeric($campaign['end_date'])) {
+        $end_date = (int) $campaign['end_date'];
+    }
 
     return [
-        'campaign_id' => sanitize_text_field($campaign_id),
-        'title' => sanitize_text_field($title),
-        'content' => wp_kses_post($content),
-        'status' => $status,
+        'campaign_id'   => sanitize_text_field($campaign_id),
+        'title'         => sanitize_text_field($title),
+        'content'       => wp_kses_post($content),
+        'status'        => $status,
+        'zeffy_url'     => esc_url_raw($zeffy_url),
+        'campaign_type' => sanitize_text_field($campaign_type),
+        'start_date'    => $start_date,
+        'end_date'      => $end_date,
     ];
 }
 
@@ -605,42 +668,50 @@ function zeffy_sync_first_non_empty(...$values): string
 }
 
 /**
- * @param array<string, string> $normalized
+ * @param array<string, mixed> $normalized
  */
 function zeffy_sync_upsert_post(array $normalized, string $post_type): string
 {
     $existing = get_posts([
-        'post_type' => $post_type,
-        'post_status' => 'any',
-        'meta_query' => [
+        'post_type'        => $post_type,
+        'post_status'      => 'any',
+        'meta_query'       => [
             [
-                'key' => '_zeffy_campaign_id',
+                'key'   => '_zeffy_campaign_id',
                 'value' => $normalized['campaign_id'],
             ],
         ],
-        'posts_per_page' => 1,
-        'fields' => 'ids',
-        'no_found_rows' => true,
+        'posts_per_page'   => 1,
+        'fields'           => 'ids',
+        'no_found_rows'    => true,
+        'suppress_filters' => false,
     ]);
 
     $slug = sanitize_title('zeffy-event-' . $normalized['campaign_id']);
 
     $postarr = [
-        'post_title' => $normalized['title'],
+        'post_title'   => $normalized['title'],
         'post_content' => $normalized['content'],
-        'post_status' => $normalized['status'],
-        'post_type' => $post_type,
-        'post_name' => $slug,
+        'post_status'  => $normalized['status'],
+        'post_type'    => $post_type,
+        'post_name'    => $slug,
     ];
 
     if (!empty($existing)) {
-        $postarr['ID'] = (int) $existing[0];
+        $existing_id = (int) $existing[0];
+
+        $actual_type = get_post_type($existing_id);
+        if ($actual_type !== $post_type) {
+            return 'skipped';
+        }
+
+        $postarr['ID'] = $existing_id;
         $post_id = wp_update_post($postarr, true);
         if (is_wp_error($post_id)) {
             return 'skipped';
         }
 
-        update_post_meta((int) $post_id, '_zeffy_campaign_id', $normalized['campaign_id']);
+        zeffy_sync_write_post_meta((int) $post_id, $normalized);
         return 'updated';
     }
 
@@ -649,8 +720,32 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
         return 'skipped';
     }
 
-    update_post_meta((int) $post_id, '_zeffy_campaign_id', $normalized['campaign_id']);
+    zeffy_sync_write_post_meta((int) $post_id, $normalized);
     return 'created';
+}
+
+/**
+ * @param array<string, mixed> $normalized
+ */
+function zeffy_sync_write_post_meta(int $post_id, array $normalized): void
+{
+    update_post_meta($post_id, '_zeffy_campaign_id', $normalized['campaign_id']);
+
+    if (isset($normalized['zeffy_url']) && $normalized['zeffy_url'] !== '') {
+        update_post_meta($post_id, '_zeffy_url', $normalized['zeffy_url']);
+    }
+
+    if (isset($normalized['campaign_type']) && $normalized['campaign_type'] !== '') {
+        update_post_meta($post_id, '_zeffy_campaign_type', $normalized['campaign_type']);
+    }
+
+    if (isset($normalized['start_date']) && $normalized['start_date'] !== null) {
+        update_post_meta($post_id, '_zeffy_start_date', (int) $normalized['start_date']);
+    }
+
+    if (isset($normalized['end_date']) && $normalized['end_date'] !== null) {
+        update_post_meta($post_id, '_zeffy_end_date', (int) $normalized['end_date']);
+    }
 }
 
 if (defined('WP_CLI') && WP_CLI) {
