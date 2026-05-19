@@ -25,9 +25,9 @@ You can also trigger a manual run with **Run Sync Now**.
 ## Behavior
 
 - Schedules a recurring sync on activation using the selected interval.
-- Pulls Zeffy campaigns and normalizes key fields (`id`, `name/title`, `description/summary/details`, `status`).
+- Pulls Zeffy events (including nested campaign events when present) and normalizes key fields (`event_id/id/campaign_id`, `event_name/name/title`, `details/description/summary`, `status`).
 - Finds existing content via `_zeffy_campaign_id` post meta.
-- Creates new posts/events when no match exists; updates existing ones otherwise.
+- Creates a post for each new event; updates the matching post when the event already exists.
 - Stores Zeffy campaign linkage in `_zeffy_campaign_id`.
 
 ## WP-CLI

@@ -406,12 +406,16 @@ function zeffy_sync_run(): array
 {
     $settings = zeffy_sync_get_settings();
     if ($settings['api_key'] === '') {
-        return ['total' => 0, 'created' => 0, 'updated' => 0, 'skipped' => 0];
+        $summary = ['total' => 0, 'created' => 0, 'updated' => 0, 'skipped' => 0];
+        zeffy_sync_log_sync_completed($summary, 'Missing API key.');
+        return $summary;
     }
 
     $campaigns = zeffy_sync_fetch_campaigns($settings['api_key'], $settings['api_endpoint']);
     if (is_wp_error($campaigns)) {
-        return ['total' => 0, 'created' => 0, 'updated' => 0, 'skipped' => 0];
+        $summary = ['total' => 0, 'created' => 0, 'updated' => 0, 'skipped' => 0];
+        zeffy_sync_log_sync_completed($summary, 'Event fetch failed: ' . $campaigns->get_error_message());
+        return $summary;
     }
 
     $summary = ['total' => count($campaigns), 'created' => 0, 'updated' => 0, 'skipped' => 0];
@@ -438,7 +442,32 @@ function zeffy_sync_run(): array
         }
     }
 
+    zeffy_sync_log_sync_completed($summary);
     return $summary;
+}
+
+/**
+ * @param array<string, int> $summary
+ */
+function zeffy_sync_log_sync_completed(array $summary, string $context = ''): void
+{
+    if (!defined('WP_DEBUG') || !WP_DEBUG) {
+        return;
+    }
+
+    $message = sprintf(
+        'Sync completed. Total: %d, created: %d, updated: %d, skipped: %d',
+        (int) ($summary['total'] ?? 0),
+        (int) ($summary['created'] ?? 0),
+        (int) ($summary['updated'] ?? 0),
+        (int) ($summary['skipped'] ?? 0)
+    );
+
+    if ($context !== '') {
+        $message .= ' Context: ' . sanitize_text_field($context);
+    }
+
+    error_log('[Zeffy Sync] ' . $message);
 }
 
 /**
@@ -470,13 +499,13 @@ function zeffy_sync_fetch_campaigns(string $api_key, string $endpoint)
     $decoded = json_decode($body, true);
 
     if (is_array($decoded) && array_values($decoded) === $decoded) {
-        return $decoded;
+        return zeffy_sync_extract_events($decoded);
     }
 
     if (is_array($decoded)) {
-        foreach (['data', 'campaigns', 'results'] as $key) {
+        foreach (['data', 'campaigns', 'results', 'events'] as $key) {
             if (isset($decoded[$key]) && is_array($decoded[$key])) {
-                return $decoded[$key];
+                return zeffy_sync_extract_events($decoded[$key]);
             }
         }
     }
@@ -485,18 +514,65 @@ function zeffy_sync_fetch_campaigns(string $api_key, string $endpoint)
 }
 
 /**
+ * @param array<int, mixed> $items
+ * @return array<int, array<string, mixed>>
+ */
+function zeffy_sync_extract_events(array $items): array
+{
+    $events = [];
+
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        if (isset($item['events']) && is_array($item['events']) && array_values($item['events']) === $item['events']) {
+            $campaign_context = $item;
+            unset($campaign_context['events']);
+
+            foreach ($item['events'] as $event) {
+                if (!is_array($event)) {
+                    continue;
+                }
+
+                $events[] = array_merge($campaign_context, $event);
+            }
+            continue;
+        }
+
+        $events[] = $item;
+    }
+
+    return $events;
+}
+
+/**
  * @param array<string, mixed> $campaign
  * @return array<string, string>|WP_Error
  */
 function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
 {
-    $campaign_id = zeffy_sync_first_non_empty($campaign['id'] ?? null, $campaign['campaign_id'] ?? null);
+    $campaign_id = zeffy_sync_first_non_empty(
+        $campaign['event_id'] ?? null,
+        $campaign['id'] ?? null,
+        $campaign['campaign_id'] ?? null,
+        $campaign['uuid'] ?? null
+    );
     if ($campaign_id === '') {
         return new WP_Error('zeffy_sync_missing_campaign_id', 'Campaign is missing an ID.');
     }
 
-    $title = zeffy_sync_first_non_empty($campaign['name'] ?? null, $campaign['title'] ?? null, 'Zeffy campaign ' . $campaign_id);
-    $content = zeffy_sync_first_non_empty($campaign['description'] ?? null, $campaign['summary'] ?? null, $campaign['details'] ?? null);
+    $title = zeffy_sync_first_non_empty(
+        $campaign['event_name'] ?? null,
+        $campaign['name'] ?? null,
+        $campaign['title'] ?? null,
+        'Zeffy event ' . $campaign_id
+    );
+    $content = zeffy_sync_first_non_empty(
+        $campaign['details'] ?? null,
+        $campaign['description'] ?? null,
+        $campaign['summary'] ?? null
+    );
 
     $status = zeffy_sync_first_non_empty($campaign['status'] ?? null, $default_status);
     $status = in_array($status, ['publish', 'draft', 'private', 'pending'], true) ? $status : $default_status;
@@ -515,7 +591,7 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
 function zeffy_sync_first_non_empty(...$values): string
 {
     foreach ($values as $value) {
-        if ($value === null) {
+        if ($value === null || is_array($value) || is_object($value)) {
             continue;
         }
 
