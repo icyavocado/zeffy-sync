@@ -35,3 +35,11 @@ You can also trigger a manual run with **Run Sync Now**.
 ```bash
 wp zeffy-sync run
 ```
+
+## CI zip artifact
+
+GitHub Actions builds a plugin zip artifact on each push and pull request.
+
+1. Open the workflow run for **Build plugin zip**.
+2. Download artifact **zeffy-sync-plugin**.
+3. Install in WordPress via **Plugins → Add New → Upload Plugin**.

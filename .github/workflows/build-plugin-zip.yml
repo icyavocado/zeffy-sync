@@ -1,0 +1,41 @@
+name: Build plugin zip
+
+on:
+  push:
+    branches:
+      - main
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-zip:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build plugin zip
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist/zeffy-sync
+
+          cp zeffy-sync.php dist/zeffy-sync/
+          cp README.md dist/zeffy-sync/
+
+          if [ -d docs ]; then
+            cp -R docs dist/zeffy-sync/
+          fi
+
+          (cd dist && zip -r zeffy-sync.zip zeffy-sync)
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zeffy-sync-plugin
+          path: dist/zeffy-sync.zip
+          if-no-files-found: error
