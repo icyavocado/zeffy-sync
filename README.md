@@ -19,6 +19,7 @@ The settings page includes pre-filled defaults that you can change:
 - **Target Post Type** (default: `post`)
 - **Default Post Status** (default: `publish`)
 - **Sync Interval** (default: `hourly`)
+- **Campaigns to Import** (Event, Donation, Membership)
 
 You can also trigger a manual run with **Run Sync Now**.
 
@@ -29,6 +30,12 @@ You can also trigger a manual run with **Run Sync Now**.
 - Finds existing content via `_zeffy_campaign_id` post meta.
 - Creates a post for each new event; updates the matching post when the event already exists.
 - Stores Zeffy campaign linkage in `_zeffy_campaign_id`.
+- Supports category-based import filtering using Zeffy `category` values:
+  - `Event` → Event
+  - `DonationForm` → Donation
+  - `MembershipV2` → Membership
+- Uses campaign `title` for post title, `description` for post body, `url` as `zeffy_url` meta, and `banner_url` as the featured image.
+- Applies matching WordPress category and post tag terms for Event, Donation, and Membership campaigns.
 
 ## WP-CLI
 

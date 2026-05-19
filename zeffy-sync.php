@@ -41,7 +41,7 @@ function zeffy_sync_activate(): void
 }
 
 /**
- * @return array<string, string>
+ * @return array<string, mixed>
  */
 function zeffy_sync_default_settings(): array
 {
@@ -51,11 +51,66 @@ function zeffy_sync_default_settings(): array
         'post_type' => 'post',
         'default_status' => 'publish',
         'sync_interval' => 'hourly',
+        'campaign_categories' => array_keys(zeffy_sync_campaign_category_map()),
     ];
 }
 
 /**
- * @return array<string, string>
+ * @return array<string, array<string, string>>
+ */
+function zeffy_sync_campaign_category_map(): array
+{
+    return [
+        'Event' => [
+            'label' => 'Events',
+            'tag' => 'Event',
+            'category' => 'Event',
+        ],
+        'DonationForm' => [
+            'label' => 'Donation',
+            'tag' => 'Donation',
+            'category' => 'Donation',
+        ],
+        'MembershipV2' => [
+            'label' => 'Membership',
+            'tag' => 'Membership',
+            'category' => 'Membership',
+        ],
+    ];
+}
+
+/**
+ * @param mixed $categories
+ * @return array<int, string>
+ */
+function zeffy_sync_sanitize_campaign_categories($categories): array
+{
+    if (!is_array($categories)) {
+        return [];
+    }
+
+    $allowed_categories = array_keys(zeffy_sync_campaign_category_map());
+    $sanitized = [];
+    foreach ($categories as $category) {
+        if (!is_scalar($category)) {
+            continue;
+        }
+
+        $value = trim((string) $category);
+        if ($value === '') {
+            continue;
+        }
+
+        if (in_array($value, $allowed_categories, true)) {
+            $sanitized[] = $value;
+        }
+    }
+
+    return array_values(array_unique($sanitized));
+}
+
+/**
+ * @return array<string, mixed>
  */
 function zeffy_sync_get_settings(): array
 {
@@ -114,7 +169,7 @@ function zeffy_sync_register_settings(): void
 
 /**
  * @param mixed $input
- * @return array<string, string>
+ * @return array<string, mixed>
  */
 function zeffy_sync_sanitize_settings($input): array
 {
@@ -143,6 +198,8 @@ function zeffy_sync_sanitize_settings($input): array
         $interval = $defaults['sync_interval'];
     }
 
+    $campaign_categories = zeffy_sync_sanitize_campaign_categories($input['campaign_categories'] ?? []);
+
     $old_settings = get_option(ZEFFY_SYNC_SETTINGS_OPTION, zeffy_sync_default_settings());
     if (!is_array($old_settings) || ($old_settings['sync_interval'] ?? '') !== $interval) {
         zeffy_sync_reschedule_event($interval);
@@ -154,6 +211,7 @@ function zeffy_sync_sanitize_settings($input): array
         'post_type' => $post_type,
         'default_status' => $status,
         'sync_interval' => $interval,
+        'campaign_categories' => $campaign_categories,
     ];
 }
 
@@ -269,6 +327,7 @@ function zeffy_sync_render_settings_page(): void
 
     $schedules = wp_get_schedules();
     $statuses = ['publish', 'draft', 'pending', 'private'];
+    $campaign_category_map = zeffy_sync_campaign_category_map();
     $detailed_log = array_reverse(zeffy_sync_get_detailed_log());
     ?>
     <div class="wrap">
@@ -319,6 +378,24 @@ function zeffy_sync_render_settings_page(): void
                                 <option value="<?php echo esc_attr($key); ?>" <?php selected($settings['sync_interval'], $key); ?>><?php echo esc_html($schedule['display']); ?></option>
                             <?php endforeach; ?>
                         </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">Campaigns to Import</th>
+                    <td>
+                        <input type="hidden" name="<?php echo esc_attr(ZEFFY_SYNC_SETTINGS_OPTION); ?>[campaign_categories][]" value="" />
+                        <?php foreach ($campaign_category_map as $key => $campaign_category) : ?>
+                            <label style="display: block; margin-bottom: 4px;">
+                                <input
+                                    type="checkbox"
+                                    name="<?php echo esc_attr(ZEFFY_SYNC_SETTINGS_OPTION); ?>[campaign_categories][]"
+                                    value="<?php echo esc_attr($key); ?>"
+                                    <?php checked(in_array($key, $settings['campaign_categories'], true)); ?>
+                                />
+                                <?php echo esc_html($campaign_category['label']); ?>
+                            </label>
+                        <?php endforeach; ?>
+                        <p class="description">Choose which Zeffy campaign categories should be imported.</p>
                     </td>
                 </tr>
             </table>
@@ -596,6 +673,7 @@ function zeffy_sync_run(): array
             'default_status' => $settings['default_status'],
             'sync_interval' => $settings['sync_interval'],
             'endpoint' => $settings['api_endpoint'],
+            'campaign_categories' => $settings['campaign_categories'],
         ]
     );
 
@@ -664,8 +742,23 @@ function zeffy_sync_run(): array
                 'index' => (int) $index,
                 'campaign_id' => $normalized['campaign_id'],
                 'post_status' => $normalized['status'],
+                'campaign_category' => $normalized['campaign_category'],
             ]
         );
+
+        if (!in_array($normalized['campaign_category'], $settings['campaign_categories'], true)) {
+            $summary['skipped']++;
+            zeffy_sync_append_detailed_log(
+                'Skipped campaign because category is not selected for import.',
+                'info',
+                [
+                    'index' => (int) $index,
+                    'campaign_id' => $normalized['campaign_id'],
+                    'campaign_category' => $normalized['campaign_category'],
+                ]
+            );
+            continue;
+        }
 
         $result = zeffy_sync_upsert_post($normalized, $settings['post_type']);
         if ($result === 'created') {
@@ -978,14 +1071,14 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
     }
 
     $title = zeffy_sync_first_non_empty(
+        $campaign['title'] ?? null,
         $campaign['event_name'] ?? null,
         $campaign['name'] ?? null,
-        $campaign['title'] ?? null,
         'Zeffy event ' . $campaign_id
     );
     $content = zeffy_sync_first_non_empty(
-        $campaign['details'] ?? null,
         $campaign['description'] ?? null,
+        $campaign['details'] ?? null,
         $campaign['summary'] ?? null
     );
 
@@ -1005,6 +1098,16 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
     // Extra meta fields
     $zeffy_url = (isset($campaign['url']) && is_string($campaign['url'])) ? $campaign['url'] : '';
     $campaign_type = (isset($campaign['type']) && is_string($campaign['type'])) ? $campaign['type'] : '';
+    $campaign_category = (isset($campaign['category']) && is_string($campaign['category'])) ? trim($campaign['category']) : '';
+    $banner_url = (isset($campaign['banner_url']) && is_string($campaign['banner_url'])) ? $campaign['banner_url'] : '';
+
+    if (!isset(zeffy_sync_campaign_category_map()[$campaign_category])) {
+        return new WP_Error(
+            'zeffy_sync_unsupported_campaign_category',
+            'Campaign category is not supported for import.',
+            ['category' => $campaign_category]
+        );
+    }
 
     // Compute start/end from occurrences
     $start_date = null;
@@ -1041,6 +1144,8 @@ function zeffy_sync_normalize_campaign(array $campaign, string $default_status)
         'status'        => $status,
         'zeffy_url'     => esc_url_raw($zeffy_url),
         'campaign_type' => sanitize_text_field($campaign_type),
+        'campaign_category' => sanitize_text_field($campaign_category),
+        'banner_url'    => esc_url_raw($banner_url),
         'start_date'    => $start_date,
         'end_date'      => $end_date,
     ];
@@ -1110,6 +1215,8 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
         }
 
         zeffy_sync_write_post_meta((int) $post_id, $normalized);
+        zeffy_sync_sync_campaign_terms((int) $post_id, (string) $normalized['campaign_category']);
+        zeffy_sync_set_featured_image_from_url((int) $post_id, (string) $normalized['banner_url'], (string) $normalized['title']);
         return 'updated';
     }
 
@@ -1119,6 +1226,8 @@ function zeffy_sync_upsert_post(array $normalized, string $post_type): string
     }
 
     zeffy_sync_write_post_meta((int) $post_id, $normalized);
+    zeffy_sync_sync_campaign_terms((int) $post_id, (string) $normalized['campaign_category']);
+    zeffy_sync_set_featured_image_from_url((int) $post_id, (string) $normalized['banner_url'], (string) $normalized['title']);
     return 'created';
 }
 
@@ -1129,12 +1238,30 @@ function zeffy_sync_write_post_meta(int $post_id, array $normalized): void
 {
     update_post_meta($post_id, '_zeffy_campaign_id', $normalized['campaign_id']);
 
-    if (isset($normalized['zeffy_url']) && $normalized['zeffy_url'] !== '') {
-        update_post_meta($post_id, '_zeffy_url', $normalized['zeffy_url']);
+    if (isset($normalized['zeffy_url'])) {
+        if ($normalized['zeffy_url'] !== '') {
+            update_post_meta($post_id, '_zeffy_url', $normalized['zeffy_url']);
+            update_post_meta($post_id, 'zeffy_url', $normalized['zeffy_url']);
+        } else {
+            delete_post_meta($post_id, '_zeffy_url');
+            delete_post_meta($post_id, 'zeffy_url');
+        }
     }
 
     if (isset($normalized['campaign_type']) && $normalized['campaign_type'] !== '') {
         update_post_meta($post_id, '_zeffy_campaign_type', $normalized['campaign_type']);
+    }
+
+    if (isset($normalized['campaign_category']) && $normalized['campaign_category'] !== '') {
+        update_post_meta($post_id, '_zeffy_campaign_category', $normalized['campaign_category']);
+    }
+
+    if (isset($normalized['banner_url'])) {
+        if ($normalized['banner_url'] !== '') {
+            update_post_meta($post_id, '_zeffy_banner_url', $normalized['banner_url']);
+        } else {
+            delete_post_meta($post_id, '_zeffy_banner_url');
+        }
     }
 
     if (isset($normalized['start_date']) && $normalized['start_date'] !== null) {
@@ -1144,6 +1271,90 @@ function zeffy_sync_write_post_meta(int $post_id, array $normalized): void
     if (isset($normalized['end_date']) && $normalized['end_date'] !== null) {
         update_post_meta($post_id, '_zeffy_end_date', (int) $normalized['end_date']);
     }
+}
+
+function zeffy_sync_sync_campaign_terms(int $post_id, string $campaign_category): void
+{
+    $campaign_map = zeffy_sync_campaign_category_map();
+    if (!isset($campaign_map[$campaign_category])) {
+        return;
+    }
+
+    $post_type = get_post_type($post_id);
+    if (!is_string($post_type) || $post_type === '') {
+        return;
+    }
+
+    $known_category_terms = array_map(
+        static function (array $item): string {
+            return $item['category'];
+        },
+        $campaign_map
+    );
+    $known_tag_terms = array_map(
+        static function (array $item): string {
+            return $item['tag'];
+        },
+        $campaign_map
+    );
+
+    if (taxonomy_exists('category') && is_object_in_taxonomy($post_type, 'category')) {
+        wp_remove_object_terms($post_id, $known_category_terms, 'category');
+        wp_set_object_terms($post_id, [$campaign_map[$campaign_category]['category']], 'category', true);
+    }
+
+    if (taxonomy_exists('post_tag') && is_object_in_taxonomy($post_type, 'post_tag')) {
+        wp_remove_object_terms($post_id, $known_tag_terms, 'post_tag');
+        wp_set_object_terms($post_id, [$campaign_map[$campaign_category]['tag']], 'post_tag', true);
+    }
+}
+
+function zeffy_sync_set_featured_image_from_url(int $post_id, string $banner_url, string $title = ''): void
+{
+    if ($banner_url === '' || !filter_var($banner_url, FILTER_VALIDATE_URL)) {
+        return;
+    }
+
+    $current_banner_url = (string) get_post_meta($post_id, '_zeffy_banner_url', true);
+    $current_thumbnail = get_post_thumbnail_id($post_id);
+    if ($current_banner_url === $banner_url && !empty($current_thumbnail)) {
+        return;
+    }
+
+    if (!function_exists('media_handle_sideload')) {
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+    }
+    if (!function_exists('wp_generate_attachment_metadata')) {
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+    }
+    if (!function_exists('download_url')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+
+    $temp_file = download_url($banner_url, 20);
+    if (is_wp_error($temp_file)) {
+        return;
+    }
+
+    $path = parse_url($banner_url, PHP_URL_PATH);
+    $filename = is_string($path) ? basename($path) : '';
+    if ($filename === '') {
+        $filename = sanitize_title($title !== '' ? $title : 'zeffy-banner') . '.jpg';
+    }
+
+    $file_array = [
+        'name' => sanitize_file_name($filename),
+        'tmp_name' => $temp_file,
+    ];
+
+    $attachment_id = media_handle_sideload($file_array, $post_id, $title);
+    if (is_wp_error($attachment_id)) {
+        @unlink($temp_file);
+        return;
+    }
+
+    set_post_thumbnail($post_id, (int) $attachment_id);
+    update_post_meta($post_id, '_zeffy_banner_url', esc_url_raw($banner_url));
 }
 
 if (defined('WP_CLI') && WP_CLI) {
