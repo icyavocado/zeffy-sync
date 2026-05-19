@@ -1251,33 +1251,7 @@ function zeffy_sync_normalize_campaign_url(array $campaign): string
         return $source_url;
     }
 
-    $path_type = '';
-    if (count($segments) >= 2) {
-        $source_path_type = strtolower((string) $segments[count($segments) - 2]);
-        $source_map = [
-            'event' => 'ticketing',
-            'ticketing' => 'ticketing',
-            'donation' => 'donation',
-            'membership' => 'membership',
-        ];
-        if (isset($source_map[$source_path_type])) {
-            $path_type = $source_map[$source_path_type];
-        }
-    }
-
-    if ($path_type === '') {
-        $campaign_category = zeffy_sync_normalize_campaign_category($campaign);
-        if ($campaign_category === 'Event') {
-            $path_type = 'ticketing';
-        } elseif ($campaign_category === 'DonationForm') {
-            $path_type = 'donation';
-        } elseif ($campaign_category === 'MembershipV2') {
-            $path_type = 'membership';
-        }
-    }
-    if ($path_type === '') {
-        return $source_url;
-    }
+    $path_type = 'ticketing';
 
     $locale = (isset($campaign['locale']) && is_string($campaign['locale'])) ? trim($campaign['locale']) : '';
     $currency = (isset($campaign['currency']) && is_string($campaign['currency'])) ? trim($campaign['currency']) : '';
