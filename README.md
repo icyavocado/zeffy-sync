@@ -1,37 +1,37 @@
 # zeffy-sync
 
-Sync Zeffy campaigns (events) to WordPress posts using:
+WordPress plugin that syncs Zeffy campaigns to WordPress posts.
 
-- Zeffy campaigns API: `GET https://www.zeffy.com/api/v1/campaigns`
-- WordPress posts API: `POST/GET /wp-json/wp/v2/posts`
+## Zeffy source API
 
-## Configuration
+- `GET https://www.zeffy.com/api/v1/campaigns`
 
-Set the required environment variables:
+## WordPress target API
 
-- `ZEFFY_API_KEY`: Zeffy API bearer token
-- `WP_BASE_URL`: WordPress site URL (for example `https://example.org`)
-- `WP_USERNAME`: WordPress username
-- `WP_APP_PASSWORD`: WordPress application password
+- Uses core post APIs equivalent to REST post operations (`/wp-json/wp/v2/posts`) by creating/updating posts in WordPress.
 
-## Usage
+## Installation
 
-Dry-run (no writes):
+1. Copy `zeffy-sync.php` into your WordPress plugins directory.
+2. Activate **Zeffy Sync** in wp-admin.
+3. Configure your Zeffy API key in `wp-config.php`:
 
-```bash
-python zeffy_sync.py --dry-run
+```php
+define('ZEFFY_SYNC_API_KEY', 'your-zeffy-api-key');
 ```
 
-Live sync:
+(Alternative: set `ZEFFY_API_KEY` as an environment variable.)
+
+## Sync behavior
+
+- On activation, schedules an hourly cron sync (`zeffy_sync_run`).
+- For each Zeffy campaign:
+  - Normalizes campaign fields (`id`, `name/title`, `description/summary/details`, `status`).
+  - Finds an existing post by `_zeffy_campaign_id` meta.
+  - Creates a new post if none exists, otherwise updates the existing post.
+  - Stores campaign linkage in `_zeffy_campaign_id`.
+- Supports manual run from WP-CLI:
 
 ```bash
-python zeffy_sync.py
+wp zeffy-sync run
 ```
-
-## Behavior
-
-- Fetches campaigns from Zeffy
-- Normalizes campaign fields
-- Maps each campaign to a deterministic slug: `zeffy-event-<campaign-id>`
-- Creates a WordPress post when no matching slug exists
-- Updates the existing WordPress post when the slug already exists
