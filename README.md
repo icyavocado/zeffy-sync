@@ -10,6 +10,8 @@ WordPress plugin that syncs Zeffy campaigns to WordPress posts/events.
 
 After activation, use the **Zeffy Sync** item in the WordPress admin sidebar.
 
+![Zeffy Sync settings UI](docs/zeffy-sync-settings-ui.png)
+
 The settings page includes pre-filled defaults that you can change:
 
 - **Zeffy API Key** (credential)
