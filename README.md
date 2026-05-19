@@ -1,36 +1,34 @@
 # zeffy-sync
 
-WordPress plugin that syncs Zeffy campaigns to WordPress posts.
+WordPress plugin that syncs Zeffy campaigns to WordPress posts/events.
 
 ## Zeffy source API
 
 - `GET https://www.zeffy.com/api/v1/campaigns`
 
-## WordPress target API
+## WordPress UI setup
 
-- Uses core post APIs equivalent to REST post operations (`/wp-json/wp/v2/posts`) by creating/updating posts in WordPress.
+After activation, use the **Zeffy Sync** item in the WordPress admin sidebar.
 
-## Installation
+The settings page includes pre-filled defaults that you can change:
 
-1. Copy `zeffy-sync.php` into your WordPress plugins directory.
-2. Activate **Zeffy Sync** in wp-admin.
-3. Configure your Zeffy API key in `wp-config.php`:
+- **Zeffy API Key** (credential)
+- **Zeffy Campaigns Endpoint** (default: `https://www.zeffy.com/api/v1/campaigns`)
+- **Target Post Type** (default: `post`)
+- **Default Post Status** (default: `publish`)
+- **Sync Interval** (default: `hourly`)
 
-```php
-define('ZEFFY_SYNC_API_KEY', 'your-zeffy-api-key');
-```
+You can also trigger a manual run with **Run Sync Now**.
 
-(Alternative: set `ZEFFY_API_KEY` as an environment variable.)
+## Behavior
 
-## Sync behavior
+- Schedules a recurring sync on activation using the selected interval.
+- Pulls Zeffy campaigns and normalizes key fields (`id`, `name/title`, `description/summary/details`, `status`).
+- Finds existing content via `_zeffy_campaign_id` post meta.
+- Creates new posts/events when no match exists; updates existing ones otherwise.
+- Stores Zeffy campaign linkage in `_zeffy_campaign_id`.
 
-- On activation, schedules an hourly cron sync (`zeffy_sync_run`).
-- For each Zeffy campaign:
-  - Normalizes campaign fields (`id`, `name/title`, `description/summary/details`, `status`).
-  - Finds an existing post by `_zeffy_campaign_id` meta.
-  - Creates a new post if none exists, otherwise updates the existing post.
-  - Stores campaign linkage in `_zeffy_campaign_id`.
-- Supports manual run from WP-CLI:
+## WP-CLI
 
 ```bash
 wp zeffy-sync run
