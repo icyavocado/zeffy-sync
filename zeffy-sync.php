@@ -17,6 +17,9 @@ const ZEFFY_SYNC_DEFAULT_ENDPOINT = 'https://www.zeffy.com/api/v1/campaigns';
 const ZEFFY_SYNC_UPDATE_TRANSIENT = 'zeffy_sync_latest_release';
 const ZEFFY_SYNC_GITHUB_REPO = 'icyavocado/zeffy-sync';
 const ZEFFY_SYNC_GITHUB_RELEASES_API = 'https://api.github.com/repos/' . ZEFFY_SYNC_GITHUB_REPO . '/releases/latest';
+const ZEFFY_SYNC_LOG_OPTION = 'zeffy_sync_detailed_log';
+const ZEFFY_SYNC_LOG_MAX_ENTRIES = 200;
+const ZEFFY_SYNC_LOG_MAX_RESPONSE_BODY = 4000;
 
 register_activation_hook(__FILE__, 'zeffy_sync_activate');
 register_deactivation_hook(__FILE__, static function (): void {
@@ -161,6 +164,96 @@ function zeffy_sync_reschedule_event(string $interval): void
     }
 }
 
+/**
+ * @return array<int, array<string, mixed>>
+ */
+function zeffy_sync_get_detailed_log(): array
+{
+    $log = get_option(ZEFFY_SYNC_LOG_OPTION, []);
+    return is_array($log) ? $log : [];
+}
+
+/**
+ * @param mixed $value
+ * @return mixed
+ */
+function zeffy_sync_prepare_log_value($value)
+{
+    if (is_array($value)) {
+        $prepared = [];
+        foreach ($value as $key => $item) {
+            if (!is_scalar($key)) {
+                continue;
+            }
+            $prepared[sanitize_key((string) $key)] = zeffy_sync_prepare_log_value($item);
+        }
+        return $prepared;
+    }
+
+    if (is_object($value)) {
+        return zeffy_sync_prepare_log_value((array) $value);
+    }
+
+    if (is_string($value)) {
+        return sanitize_textarea_field($value);
+    }
+
+    if (is_int($value) || is_float($value) || is_bool($value) || $value === null) {
+        return $value;
+    }
+
+    return sanitize_text_field((string) $value);
+}
+
+/**
+ * @param array<string, mixed> $context
+ */
+function zeffy_sync_append_detailed_log(string $message, string $level = 'info', array $context = []): void
+{
+    $log = zeffy_sync_get_detailed_log();
+    $allowed_levels = ['info', 'warning', 'error'];
+    if (!in_array($level, $allowed_levels, true)) {
+        $level = 'info';
+    }
+
+    $entry = [
+        'timestamp' => current_time('mysql'),
+        'level' => $level,
+        'message' => sanitize_text_field($message),
+        'context' => zeffy_sync_prepare_log_value($context),
+    ];
+
+    $log[] = $entry;
+    if (count($log) > ZEFFY_SYNC_LOG_MAX_ENTRIES) {
+        $log = array_slice($log, -ZEFFY_SYNC_LOG_MAX_ENTRIES);
+    }
+
+    update_option(ZEFFY_SYNC_LOG_OPTION, $log, false);
+}
+
+function zeffy_sync_mask_secret(string $secret): string
+{
+    if ($secret === '') {
+        return '';
+    }
+
+    $length = strlen($secret);
+    if ($length <= 8) {
+        return str_repeat('*', $length);
+    }
+
+    return str_repeat('*', $length - 4) . substr($secret, -4);
+}
+
+function zeffy_sync_truncate_log_body(string $body): string
+{
+    if (strlen($body) <= ZEFFY_SYNC_LOG_MAX_RESPONSE_BODY) {
+        return $body;
+    }
+
+    return substr($body, 0, ZEFFY_SYNC_LOG_MAX_RESPONSE_BODY) . '...[truncated]';
+}
+
 function zeffy_sync_render_settings_page(): void
 {
     if (!current_user_can('manage_options')) {
@@ -175,6 +268,7 @@ function zeffy_sync_render_settings_page(): void
 
     $schedules = wp_get_schedules();
     $statuses = ['publish', 'draft', 'pending', 'private'];
+    $detailed_log = array_reverse(zeffy_sync_get_detailed_log());
     ?>
     <div class="wrap">
         <h1>Zeffy Sync</h1>
@@ -234,6 +328,43 @@ function zeffy_sync_render_settings_page(): void
         <p>
             <a class="button button-secondary" href="<?php echo esc_url($run_now_url); ?>">Run Sync Now</a>
         </p>
+
+        <h2>Detailed Zeffy Sync Log</h2>
+        <p>Shows Zeffy request/response details and each sync step for troubleshooting.</p>
+        <?php if (empty($detailed_log)) : ?>
+            <p>No sync logs available yet.</p>
+        <?php else : ?>
+            <table class="widefat striped" role="presentation">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Level</th>
+                        <th>Step</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($detailed_log as $entry) : ?>
+                        <?php
+                        $timestamp = isset($entry['timestamp']) ? (string) $entry['timestamp'] : '';
+                        $level = isset($entry['level']) ? (string) $entry['level'] : 'info';
+                        $message = isset($entry['message']) ? (string) $entry['message'] : '';
+                        $context = isset($entry['context']) ? $entry['context'] : [];
+                        $context_json = wp_json_encode($context, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+                        if (!is_string($context_json)) {
+                            $context_json = '';
+                        }
+                        ?>
+                        <tr>
+                            <td><?php echo esc_html($timestamp); ?></td>
+                            <td><?php echo esc_html(strtoupper($level)); ?></td>
+                            <td><?php echo esc_html($message); ?></td>
+                            <td><pre style="white-space: pre-wrap; margin: 0;"><?php echo esc_html($context_json); ?></pre></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
     </div>
     <?php
 }
@@ -405,8 +536,20 @@ function zeffy_sync_get_installed_version(): string
 function zeffy_sync_run(): array
 {
     $settings = zeffy_sync_get_settings();
+    zeffy_sync_append_detailed_log(
+        'Sync started.',
+        'info',
+        [
+            'post_type' => $settings['post_type'],
+            'default_status' => $settings['default_status'],
+            'sync_interval' => $settings['sync_interval'],
+            'endpoint' => $settings['api_endpoint'],
+        ]
+    );
+
     if ($settings['api_key'] === '') {
         $summary = ['total' => 0, 'created' => 0, 'updated' => 0, 'skipped' => 0];
+        zeffy_sync_append_detailed_log('Sync stopped because API key is missing.', 'error');
         zeffy_sync_log_sync_completed($summary, 'Missing API key.');
         return $summary;
     }
@@ -414,23 +557,63 @@ function zeffy_sync_run(): array
     $campaigns = zeffy_sync_fetch_campaigns($settings['api_key'], $settings['api_endpoint']);
     if (is_wp_error($campaigns)) {
         $summary = ['total' => 0, 'created' => 0, 'updated' => 0, 'skipped' => 0];
+        zeffy_sync_append_detailed_log(
+            'Failed to fetch Zeffy campaigns.',
+            'error',
+            [
+                'error_code' => $campaigns->get_error_code(),
+                'error_message' => $campaigns->get_error_message(),
+                'error_data' => $campaigns->get_error_data(),
+            ]
+        );
         zeffy_sync_log_sync_completed($summary, 'Event fetch failed: ' . $campaigns->get_error_message());
         return $summary;
     }
 
     $summary = ['total' => count($campaigns), 'created' => 0, 'updated' => 0, 'skipped' => 0];
+    zeffy_sync_append_detailed_log('Fetched campaigns from Zeffy.', 'info', ['campaign_count' => $summary['total']]);
 
-    foreach ($campaigns as $campaign) {
+    foreach ($campaigns as $index => $campaign) {
         if (!is_array($campaign)) {
             $summary['skipped']++;
+            zeffy_sync_append_detailed_log(
+                'Skipped campaign because payload is not an array.',
+                'warning',
+                ['index' => (int) $index]
+            );
             continue;
         }
 
         $normalized = zeffy_sync_normalize_campaign($campaign, $settings['default_status']);
         if (is_wp_error($normalized)) {
             $summary['skipped']++;
+            zeffy_sync_append_detailed_log(
+                'Skipped campaign because normalization failed.',
+                'warning',
+                [
+                    'index' => (int) $index,
+                    'campaign_id' => zeffy_sync_first_non_empty(
+                        $campaign['event_id'] ?? null,
+                        $campaign['id'] ?? null,
+                        $campaign['campaign_id'] ?? null,
+                        $campaign['uuid'] ?? null
+                    ),
+                    'error_code' => $normalized->get_error_code(),
+                    'error_message' => $normalized->get_error_message(),
+                ]
+            );
             continue;
         }
+
+        zeffy_sync_append_detailed_log(
+            'Campaign normalized.',
+            'info',
+            [
+                'index' => (int) $index,
+                'campaign_id' => $normalized['campaign_id'],
+                'post_status' => $normalized['status'],
+            ]
+        );
 
         $result = zeffy_sync_upsert_post($normalized, $settings['post_type']);
         if ($result === 'created') {
@@ -440,6 +623,16 @@ function zeffy_sync_run(): array
         } else {
             $summary['skipped']++;
         }
+
+        zeffy_sync_append_detailed_log(
+            'Campaign sync step completed.',
+            'info',
+            [
+                'index' => (int) $index,
+                'campaign_id' => $normalized['campaign_id'],
+                'result' => $result,
+            ]
+        );
     }
 
     zeffy_sync_log_sync_completed($summary);
@@ -451,6 +644,20 @@ function zeffy_sync_run(): array
  */
 function zeffy_sync_log_sync_completed(array $summary, string $context = ''): void
 {
+    zeffy_sync_append_detailed_log(
+        'Sync completed.',
+        'info',
+        [
+            'summary' => [
+                'total' => (int) ($summary['total'] ?? 0),
+                'created' => (int) ($summary['created'] ?? 0),
+                'updated' => (int) ($summary['updated'] ?? 0),
+                'skipped' => (int) ($summary['skipped'] ?? 0),
+            ],
+            'context' => $context !== '' ? sanitize_text_field($context) : '',
+        ]
+    );
+
     if (!defined('WP_DEBUG') || !WP_DEBUG) {
         return;
     }
@@ -477,12 +684,31 @@ function zeffy_sync_fetch_campaigns(string $api_key, string $endpoint)
 {
     $all_campaigns = [];
     $cursor = null;
+    $page = 1;
+    $masked_api_key = zeffy_sync_mask_secret($api_key);
 
     do {
         $url = $endpoint;
         if ($cursor !== null) {
             $url = add_query_arg('starting_after', $cursor, $endpoint);
         }
+
+        zeffy_sync_append_detailed_log(
+            'Sending request to Zeffy campaigns endpoint.',
+            'info',
+            [
+                'page' => $page,
+                'request' => [
+                    'method' => 'GET',
+                    'url' => $url,
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $masked_api_key,
+                        'Accept' => 'application/json',
+                    ],
+                    'timeout' => 20,
+                ],
+            ]
+        );
 
         $response = wp_remote_get(
             $url,
@@ -496,23 +722,54 @@ function zeffy_sync_fetch_campaigns(string $api_key, string $endpoint)
         );
 
         if (is_wp_error($response)) {
+            zeffy_sync_append_detailed_log(
+                'Zeffy request failed with transport error.',
+                'error',
+                [
+                    'page' => $page,
+                    'error_code' => $response->get_error_code(),
+                    'error_message' => $response->get_error_message(),
+                ]
+            );
             return $response;
         }
 
         $status = (int) wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        zeffy_sync_append_detailed_log(
+            'Received Zeffy API response.',
+            ($status >= 200 && $status < 300) ? 'info' : 'error',
+            [
+                'page' => $page,
+                'response' => [
+                    'status' => $status,
+                    'body' => zeffy_sync_truncate_log_body($body),
+                ],
+            ]
+        );
+
         if ($status < 200 || $status >= 300) {
             return new WP_Error('zeffy_sync_http_error', 'Failed to fetch Zeffy campaigns.', ['status' => $status]);
         }
 
-        $body = wp_remote_retrieve_body($response);
         $decoded = json_decode($body, true);
 
         if (!is_array($decoded)) {
+            zeffy_sync_append_detailed_log(
+                'Zeffy response JSON decoding failed or returned non-array.',
+                'error',
+                ['page' => $page]
+            );
             return new WP_Error('zeffy_sync_invalid_response', 'Unexpected Zeffy campaigns response shape.');
         }
 
         if (array_values($decoded) === $decoded) {
             // Plain array response — no pagination support
+            zeffy_sync_append_detailed_log(
+                'Zeffy response is a plain array and will be processed directly.',
+                'info',
+                ['page' => $page, 'item_count' => count($decoded)]
+            );
             return zeffy_sync_extract_events($decoded);
         }
 
@@ -522,6 +779,17 @@ function zeffy_sync_fetch_campaigns(string $api_key, string $endpoint)
             $cursor = ($has_more && isset($decoded['next_cursor']) && is_string($decoded['next_cursor']))
                 ? $decoded['next_cursor']
                 : null;
+            zeffy_sync_append_detailed_log(
+                'Processed paginated Zeffy response page.',
+                'info',
+                [
+                    'page' => $page,
+                    'page_item_count' => count($decoded['data']),
+                    'accumulated_item_count' => count($all_campaigns),
+                    'has_more' => (bool) $has_more,
+                    'next_cursor' => $cursor,
+                ]
+            );
             if (!$has_more) {
                 break;
             }
@@ -529,13 +797,25 @@ function zeffy_sync_fetch_campaigns(string $api_key, string $endpoint)
             // Fallback: try other known keys (non-paginated APIs)
             foreach (['campaigns', 'results', 'events'] as $key) {
                 if (isset($decoded[$key]) && is_array($decoded[$key])) {
+                    zeffy_sync_append_detailed_log(
+                        'Processed non-standard Zeffy response key.',
+                        'info',
+                        ['page' => $page, 'response_key' => $key, 'item_count' => count($decoded[$key])]
+                    );
                     return zeffy_sync_extract_events($decoded[$key]);
                 }
             }
+            zeffy_sync_append_detailed_log(
+                'Zeffy response shape is unsupported.',
+                'error',
+                ['page' => $page]
+            );
             return new WP_Error('zeffy_sync_invalid_response', 'Unexpected Zeffy campaigns response shape.');
         }
+        $page++;
     } while ($cursor !== null);
 
+    zeffy_sync_append_detailed_log('Finished collecting paginated Zeffy campaigns.', 'info', ['total_items' => count($all_campaigns)]);
     return zeffy_sync_extract_events($all_campaigns);
 }
 
