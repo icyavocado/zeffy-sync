@@ -3,6 +3,7 @@
  * Plugin Name: Zeffy Sync
  * Description: Sync Zeffy campaigns to WordPress posts.
  * Version: 1.1.0
+ * Update URI: https://github.com/icyavocado/zeffy-sync
  */
 
 if (!defined('ABSPATH')) {
@@ -13,6 +14,9 @@ const ZEFFY_SYNC_CRON_HOOK = 'zeffy_sync_run';
 const ZEFFY_SYNC_SETTINGS_OPTION = 'zeffy_sync_settings';
 const ZEFFY_SYNC_MENU_SLUG = 'zeffy-sync';
 const ZEFFY_SYNC_DEFAULT_ENDPOINT = 'https://www.zeffy.com/api/v1/campaigns';
+const ZEFFY_SYNC_UPDATE_TRANSIENT = 'zeffy_sync_latest_release';
+const ZEFFY_SYNC_GITHUB_REPO = 'icyavocado/zeffy-sync';
+const ZEFFY_SYNC_GITHUB_RELEASES_API = 'https://api.github.com/repos/' . ZEFFY_SYNC_GITHUB_REPO . '/releases/latest';
 
 register_activation_hook(__FILE__, 'zeffy_sync_activate');
 register_deactivation_hook(__FILE__, static function (): void {
@@ -23,6 +27,8 @@ add_action(ZEFFY_SYNC_CRON_HOOK, 'zeffy_sync_run');
 add_action('admin_menu', 'zeffy_sync_register_admin_menu');
 add_action('admin_init', 'zeffy_sync_register_settings');
 add_action('admin_post_zeffy_sync_run_now', 'zeffy_sync_handle_run_now');
+add_filter('pre_set_site_transient_update_plugins', 'zeffy_sync_maybe_set_plugin_update');
+add_filter('plugins_api', 'zeffy_sync_plugin_information', 10, 3);
 
 function zeffy_sync_activate(): void
 {
@@ -243,6 +249,152 @@ function zeffy_sync_handle_run_now(): void
 
     wp_safe_redirect(admin_url('admin.php?page=' . ZEFFY_SYNC_MENU_SLUG . '&zeffy_sync_ran=1'));
     exit;
+}
+
+/**
+ * @param mixed $transient
+ * @return mixed
+ */
+function zeffy_sync_maybe_set_plugin_update($transient)
+{
+    if (!is_object($transient)) {
+        return $transient;
+    }
+
+    $release = zeffy_sync_get_latest_release();
+    if (!is_array($release)) {
+        return $transient;
+    }
+
+    $plugin_file = plugin_basename(__FILE__);
+    $current_version = zeffy_sync_get_installed_version();
+    if (!version_compare($release['version'], $current_version, '>')) {
+        return $transient;
+    }
+
+    $transient->response[$plugin_file] = (object) [
+        'slug' => 'zeffy-sync',
+        'plugin' => $plugin_file,
+        'new_version' => $release['version'],
+        'package' => $release['download_url'],
+        'url' => $release['html_url'],
+    ];
+
+    return $transient;
+}
+
+/**
+ * @param mixed $result
+ * @param string $action
+ * @param object $args
+ * @return mixed
+ */
+function zeffy_sync_plugin_information($result, string $action, object $args)
+{
+    if ($action !== 'plugin_information' || !isset($args->slug) || $args->slug !== 'zeffy-sync') {
+        return $result;
+    }
+
+    $release = zeffy_sync_get_latest_release();
+    if (!is_array($release)) {
+        return $result;
+    }
+
+    return (object) [
+        'name' => 'Zeffy Sync',
+        'slug' => 'zeffy-sync',
+        'version' => $release['version'],
+        'requires' => '6.0',
+        'tested' => get_bloginfo('version'),
+        'download_link' => $release['download_url'],
+        'homepage' => $release['html_url'],
+        'sections' => [
+            'description' => 'Sync Zeffy campaigns to WordPress posts/events.',
+        ],
+    ];
+}
+
+/**
+ * @return array<string, string>|null
+ */
+function zeffy_sync_get_latest_release(): ?array
+{
+    $cached = get_transient(ZEFFY_SYNC_UPDATE_TRANSIENT);
+    if (is_array($cached) && isset($cached['version'], $cached['download_url'], $cached['html_url'])) {
+        return $cached;
+    }
+
+    $response = wp_remote_get(
+        ZEFFY_SYNC_GITHUB_RELEASES_API,
+        [
+            'headers' => [
+                'Accept' => 'application/vnd.github+json',
+                'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url('/'),
+            ],
+            'timeout' => 20,
+        ]
+    );
+    if (is_wp_error($response)) {
+        return null;
+    }
+
+    $status = (int) wp_remote_retrieve_response_code($response);
+    if ($status < 200 || $status >= 300) {
+        return null;
+    }
+
+    $data = json_decode((string) wp_remote_retrieve_body($response), true);
+    if (!is_array($data) || !isset($data['tag_name'], $data['html_url'])) {
+        return null;
+    }
+
+    $download_url = '';
+    if (isset($data['assets']) && is_array($data['assets'])) {
+        foreach ($data['assets'] as $asset) {
+            if (!is_array($asset)) {
+                continue;
+            }
+
+            $asset_name = (string) ($asset['name'] ?? '');
+            $asset_url = (string) ($asset['browser_download_url'] ?? '');
+            if ($asset_name === 'zeffy-sync.zip' && $asset_url !== '') {
+                $download_url = $asset_url;
+                break;
+            }
+        }
+    }
+
+    if ($download_url === '' && isset($data['zipball_url'])) {
+        $download_url = (string) $data['zipball_url'];
+    }
+    if ($download_url === '') {
+        return null;
+    }
+
+    $version = ltrim((string) $data['tag_name'], 'v');
+    if ($version === '') {
+        return null;
+    }
+
+    $release = [
+        'version' => $version,
+        'download_url' => esc_url_raw($download_url),
+        'html_url' => esc_url_raw((string) $data['html_url']),
+    ];
+
+    set_transient(ZEFFY_SYNC_UPDATE_TRANSIENT, $release, HOUR_IN_SECONDS);
+    return $release;
+}
+
+function zeffy_sync_get_installed_version(): string
+{
+    if (!function_exists('get_plugin_data')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    $data = get_plugin_data(__FILE__, false, false);
+    $version = is_array($data) ? (string) ($data['Version'] ?? '') : '';
+    return $version !== '' ? $version : '0.0.0';
 }
 
 /**

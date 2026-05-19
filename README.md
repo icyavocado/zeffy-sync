@@ -43,3 +43,9 @@ GitHub Actions builds a plugin zip artifact on each push and pull request.
 1. Open the workflow run for **Build plugin zip**.
 2. Download artifact **zeffy-sync-plugin**.
 3. Install in WordPress via **Plugins → Add New → Upload Plugin**.
+
+## Auto-update flow
+
+- On pushes to `main`, CI publishes a new GitHub Release with a versioned `zeffy-sync.zip`.
+- The plugin checks the latest GitHub release and reports updates to WordPress using `Update URI`.
+- Enable auto-updates in WordPress for **Zeffy Sync** to receive each new CI build automatically.
