@@ -1,0 +1,1753 @@
+{
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/payments": {
+      "get": {
+        "description": "Returns a paginated list of payments for the authenticated organization.",
+        "operationId": "PublicApiV1Controller_listPayments",
+        "parameters": [
+          {
+            "name": "currency",
+            "required": false,
+            "in": "query",
+            "description": "Filter by currency",
+            "schema": {
+              "enum": [
+                "cad",
+                "usd"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "contact",
+            "required": false,
+            "in": "query",
+            "description": "Filter by contact ID (UUID)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "campaign",
+            "required": false,
+            "in": "query",
+            "description": "Filter by campaign ID (UUID)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "description": "Filter by payment type",
+            "schema": {
+              "enum": [
+                "online",
+                "manual",
+                "imported"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by payment status",
+            "schema": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "pending"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "created[lte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created at or before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[lt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[gte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created at or after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[gt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "ending_before",
+            "required": false,
+            "in": "query",
+            "description": "Cursor: payment ID to end before",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "starting_after",
+            "required": false,
+            "in": "query",
+            "description": "Cursor: payment ID to start after",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of results (1-100, default 10)",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of payments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List payments",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/payments/{id}": {
+      "get": {
+        "description": "Returns a single payment with line items and subscription details.",
+        "operationId": "PublicApiV1Controller_getPayment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Payment ID (UUID)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payment object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Payment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key"
+          },
+          "404": {
+            "description": "Payment not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a payment",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/api/v1/contacts": {
+      "get": {
+        "description": "Returns a paginated list of contacts for the authenticated organization.",
+        "operationId": "PublicApiV1Controller_listContacts",
+        "parameters": [
+          {
+            "name": "email",
+            "required": false,
+            "in": "query",
+            "description": "Filter: exact match on email address",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "updated[lte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: updated at or before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "updated[lt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: updated before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "updated[gte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: updated at or after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "updated[gt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: updated after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[lte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created at or before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[lt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[gte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created at or after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[gt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "ending_before",
+            "required": false,
+            "in": "query",
+            "description": "Cursor: contact ID to end before",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "starting_after",
+            "required": false,
+            "in": "query",
+            "description": "Cursor: contact ID to start after",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of results (1-100, default 10)",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of contacts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List contacts",
+        "tags": [
+          "Contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/{id}": {
+      "get": {
+        "description": "Returns a single contact with address and donor information.",
+        "operationId": "PublicApiV1Controller_getContact",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Contact ID (UUID)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contact object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Contact"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key"
+          },
+          "404": {
+            "description": "Contact not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a contact",
+        "tags": [
+          "Contacts"
+        ]
+      }
+    },
+    "/api/v1/campaigns": {
+      "get": {
+        "description": "Returns a paginated list of campaigns (donation forms + events) for the authenticated organization.",
+        "operationId": "PublicApiV1Controller_listCampaigns",
+        "parameters": [
+          {
+            "name": "created[lte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created at or before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[lt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created before (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[gte]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created at or after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "created[gt]",
+            "required": false,
+            "in": "query",
+            "description": "Filter: created after (unix timestamp)",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "ending_before",
+            "required": false,
+            "in": "query",
+            "description": "Cursor: campaign ID to end before",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "starting_after",
+            "required": false,
+            "in": "query",
+            "description": "Cursor: campaign ID to start after",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of results (1-100, default 10)",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of campaigns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List campaigns",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{id}": {
+      "get": {
+        "description": "Returns a single campaign with title, description, and occurrences (for multi-date events).",
+        "operationId": "PublicApiV1Controller_getCampaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Campaign ID (UUID)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Campaign object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key"
+          },
+          "404": {
+            "description": "Campaign not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a campaign",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Zeffy API",
+    "description": "Public API for accessing Zeffy data — payments, contacts, and campaigns.\n\n## Authentication\n\nAll requests require a Bearer token in the `Authorization` header.\n\nTo get your API key *(organization owner only)*:\n1. Go to **[Settings → Integrations](https://www.zeffy.com/o/settings?openIntegrations=true)** in your Zeffy dashboard\n2. Complete the quick setup to generate your key\n3. Use it as: `Authorization: Bearer YOUR_API_KEY`\n\n## Webhooks\n\nTo receive real-time payment notifications, configure a webhook URL in the same **[Integrations dialog](https://www.zeffy.com/o/settings?openIntegrations=true)**.\n\nYour endpoint will receive a `POST` request with a `payment.completed` event each time a payment is processed. Respond with any `2xx` status to acknowledge receipt — non-2xx responses trigger retries.",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [
+    {
+      "url": "https://api.zeffy.com"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "Your organization API key"
+      }
+    },
+    "schemas": {
+      "Refund": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "rf1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "object": {
+            "type": "string",
+            "example": "refund",
+            "enum": [
+              "refund"
+            ]
+          },
+          "amount": {
+            "type": "number",
+            "description": "Refunded amount in cents",
+            "example": 2500
+          },
+          "currency": {
+            "type": "string",
+            "example": "cad"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "succeeded",
+              "failed"
+            ],
+            "example": "succeeded",
+            "description": "Refund status"
+          },
+          "created": {
+            "type": "number",
+            "description": "Unix timestamp",
+            "example": 1700100000
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "amount",
+          "currency",
+          "status",
+          "created"
+        ]
+      },
+      "Dispute": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "dp1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "object": {
+            "type": "string",
+            "example": "dispute",
+            "enum": [
+              "dispute"
+            ]
+          },
+          "amount": {
+            "type": "number",
+            "description": "Disputed amount in cents",
+            "example": 5000
+          },
+          "currency": {
+            "type": "string",
+            "example": "cad"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "needs_response",
+              "won",
+              "lost"
+            ],
+            "example": "needs_response",
+            "description": "Dispute status"
+          },
+          "reason": {
+            "type": "string",
+            "example": "fraudulent",
+            "description": "Reason for the dispute"
+          },
+          "created": {
+            "type": "number",
+            "description": "Unix timestamp",
+            "example": 1700200000
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "amount",
+          "currency",
+          "status",
+          "reason",
+          "created"
+        ]
+      },
+      "PaymentMethodDetail": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "card",
+            "description": "Payment method type"
+          },
+          "brand": {
+            "type": "object",
+            "nullable": true,
+            "example": "visa",
+            "description": "Card brand, if applicable"
+          },
+          "last4": {
+            "type": "object",
+            "nullable": true,
+            "example": "4242",
+            "description": "Last 4 digits of the card, if applicable"
+          }
+        },
+        "required": [
+          "type",
+          "brand",
+          "last4"
+        ]
+      },
+      "Buyer": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "object",
+            "nullable": true,
+            "example": "jane@example.com"
+          },
+          "first_name": {
+            "type": "object",
+            "nullable": true,
+            "example": "Jane"
+          },
+          "last_name": {
+            "type": "object",
+            "nullable": true,
+            "example": "Doe"
+          },
+          "is_corporate": {
+            "type": "boolean",
+            "example": false,
+            "description": "True when the buyer selected the 'I am donating as an organization' option on the form."
+          },
+          "company_name": {
+            "type": "object",
+            "nullable": true,
+            "example": "Acme Corp",
+            "description": "Company / organization name entered by the buyer when is_corporate is true. Null when the donation is from an individual."
+          }
+        },
+        "required": [
+          "email",
+          "first_name",
+          "last_name",
+          "is_corporate",
+          "company_name"
+        ]
+      },
+      "Discount": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "SAVE10",
+            "description": "Discount code entered by the buyer"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount discounted in cents",
+            "example": 1000
+          }
+        },
+        "required": [
+          "code",
+          "amount"
+        ]
+      },
+      "QuestionAnswer": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "example": "How did you hear about us?"
+          },
+          "type": {
+            "type": "string",
+            "example": "text",
+            "enum": [
+              "text",
+              "single_select",
+              "multi_select",
+              "checkbox",
+              "date",
+              "email",
+              "phone",
+              "name"
+            ]
+          },
+          "answer": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "example": "A friend told me",
+            "description": "String for text/single_select/date/email/phone/name. Array of strings for multi_select. Boolean for checkbox."
+          }
+        },
+        "required": [
+          "question",
+          "type",
+          "answer"
+        ]
+      },
+      "Tribute": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "in_honour_of",
+              "in_memory_of"
+            ],
+            "example": "in_memory_of",
+            "description": "Whether the donor made the donation in honour of someone (alive) or in memory of someone (deceased)"
+          },
+          "honouree_name": {
+            "type": "object",
+            "nullable": true,
+            "example": "Jane Smith",
+            "description": "Name of the person being honoured or memorialised, as entered by the donor. Null when the donor left it blank."
+          }
+        },
+        "required": [
+          "type",
+          "honouree_name"
+        ]
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "object": {
+            "type": "string",
+            "example": "item",
+            "enum": [
+              "item"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "donation",
+              "ticket",
+              "additional_donation"
+            ],
+            "example": "donation"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount in cents",
+            "example": 5000
+          },
+          "currency": {
+            "type": "string",
+            "example": "cad"
+          },
+          "recurrence_interval": {
+            "type": "object",
+            "nullable": true,
+            "example": "monthly",
+            "description": "Recurrence interval if recurring, null otherwise"
+          },
+          "rate_id": {
+            "type": "object",
+            "nullable": true,
+            "example": "r1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "contact_id": {
+            "type": "object",
+            "nullable": true,
+            "example": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+            "description": "Contact ID of the attendee (tickets only)"
+          },
+          "questions": {
+            "description": "Per-ticket custom questions and answers (tickets only)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionAnswer"
+            }
+          },
+          "tribute": {
+            "nullable": true,
+            "description": "Tribute (in honour of / in memory of) details for donation items. Null for non-donation items, and null when the donor did not select a tribute.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Tribute"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "type",
+          "amount",
+          "currency",
+          "recurrence_interval",
+          "rate_id",
+          "contact_id",
+          "questions",
+          "tribute"
+        ]
+      },
+      "Recurring": {
+        "type": "object",
+        "properties": {
+          "is_recurring": {
+            "type": "boolean",
+            "example": true
+          },
+          "status": {
+            "type": "string",
+            "example": "active"
+          },
+          "interval": {
+            "type": "object",
+            "nullable": true,
+            "example": "monthly"
+          },
+          "subscription_id": {
+            "type": "object",
+            "nullable": true,
+            "example": "s1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "current_period_start": {
+            "type": "object",
+            "nullable": true,
+            "description": "Unix timestamp",
+            "example": 1700000000
+          },
+          "current_period_end": {
+            "type": "object",
+            "nullable": true,
+            "description": "Unix timestamp",
+            "example": 1702592000
+          }
+        },
+        "required": [
+          "is_recurring",
+          "status",
+          "interval",
+          "subscription_id",
+          "current_period_start",
+          "current_period_end"
+        ]
+      },
+      "Payment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "p1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "object": {
+            "type": "string",
+            "example": "payment",
+            "enum": [
+              "payment"
+            ]
+          },
+          "created": {
+            "type": "number",
+            "description": "Unix timestamp",
+            "example": 1700000000
+          },
+          "amount": {
+            "type": "number",
+            "description": "Amount in cents",
+            "example": 5000
+          },
+          "eligible_amount": {
+            "type": "number",
+            "description": "Tax-receipt-eligible amount in cents",
+            "example": 5000
+          },
+          "currency": {
+            "type": "string",
+            "example": "cad"
+          },
+          "status": {
+            "type": "string",
+            "example": "succeeded"
+          },
+          "type": {
+            "type": "string",
+            "example": "online",
+            "enum": [
+              "online",
+              "manual",
+              "imported"
+            ],
+            "description": "Payment source type"
+          },
+          "refund_status": {
+            "type": "string",
+            "example": "none",
+            "enum": [
+              "none",
+              "partial",
+              "full"
+            ],
+            "description": "Refund status"
+          },
+          "refunds": {
+            "description": "List of refunds applied to this payment",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Refund"
+            }
+          },
+          "dispute": {
+            "nullable": true,
+            "description": "Dispute details if this payment has been disputed, null otherwise",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Dispute"
+              }
+            ]
+          },
+          "description": {
+            "type": "object",
+            "nullable": true,
+            "example": "Annual Gala 2025",
+            "description": "Campaign title"
+          },
+          "contact": {
+            "type": "object",
+            "nullable": true,
+            "example": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d",
+            "description": "ID of the buyer contact"
+          },
+          "payment_method": {
+            "$ref": "#/components/schemas/PaymentMethodDetail"
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/Buyer"
+          },
+          "discount": {
+            "nullable": true,
+            "description": "Discount applied to this payment, null if none",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Discount"
+              }
+            ]
+          },
+          "campaign_type": {
+            "type": "string",
+            "example": "donation_form"
+          },
+          "campaign_id": {
+            "type": "string",
+            "example": "c1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "campaign_category": {
+            "type": "string",
+            "example": "event",
+            "enum": [
+              "auction",
+              "donation",
+              "event",
+              "raffle",
+              "membership",
+              "peer_to_peer",
+              "shop",
+              "custom"
+            ],
+            "description": "Campaign category"
+          },
+          "buyer_questions": {
+            "description": "Custom questions answered by the buyer at checkout",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionAnswer"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          },
+          "occurrence_id": {
+            "type": "object",
+            "nullable": true,
+            "example": "0f37500c-3eb6-40ac-a382-760f44c19733",
+            "description": "ID of the ticketing occurrence this payment is for (ticketing only)"
+          },
+          "receipt_url": {
+            "type": "object",
+            "nullable": true,
+            "example": "https://zeffy.com/receipts/abc123",
+            "description": "Link to the tax receipt"
+          },
+          "recurring": {
+            "nullable": true,
+            "description": "Present if this is a recurring payment, null for one-time payments",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Recurring"
+              }
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Reserved for future key-value pairs",
+            "example": {}
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "amount",
+          "eligible_amount",
+          "currency",
+          "status",
+          "type",
+          "refund_status",
+          "refunds",
+          "dispute",
+          "description",
+          "contact",
+          "payment_method",
+          "buyer",
+          "discount",
+          "campaign_type",
+          "campaign_id",
+          "campaign_category",
+          "buyer_questions",
+          "items",
+          "occurrence_id",
+          "receipt_url",
+          "recurring",
+          "metadata"
+        ]
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "line1": {
+            "type": "string",
+            "example": "123 Main St",
+            "description": "Street address"
+          },
+          "city": {
+            "type": "object",
+            "example": "Montreal"
+          },
+          "state": {
+            "type": "object",
+            "example": "QC",
+            "description": "State or province code"
+          },
+          "postal_code": {
+            "type": "object",
+            "example": "H2X 1Y4"
+          },
+          "country": {
+            "type": "object",
+            "example": "CA",
+            "description": "Two-letter ISO country code"
+          }
+        },
+        "required": [
+          "line1",
+          "city",
+          "state",
+          "postal_code",
+          "country"
+        ]
+      },
+      "Contact": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "ct1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "object": {
+            "type": "string",
+            "example": "contact",
+            "enum": [
+              "contact"
+            ]
+          },
+          "created": {
+            "type": "number",
+            "description": "Unix timestamp",
+            "example": 1700000000
+          },
+          "updated": {
+            "type": "number",
+            "description": "Unix timestamp of last modification",
+            "example": 1709856000
+          },
+          "email": {
+            "type": "object",
+            "nullable": true,
+            "example": "jane@example.com"
+          },
+          "first_name": {
+            "type": "object",
+            "nullable": true,
+            "example": "Jane"
+          },
+          "last_name": {
+            "type": "object",
+            "nullable": true,
+            "example": "Doe"
+          },
+          "phone_number": {
+            "type": "object",
+            "nullable": true,
+            "example": "+15141234567"
+          },
+          "address": {
+            "nullable": true,
+            "description": "Structured mailing address, null if all fields are empty",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              }
+            ]
+          },
+          "donor_type": {
+            "type": "string",
+            "example": "individual"
+          },
+          "total_contribution": {
+            "type": "number",
+            "description": "Total contribution in cents",
+            "example": 15000
+          },
+          "currency": {
+            "type": "string",
+            "example": "cad",
+            "enum": [
+              "cad",
+              "usd"
+            ],
+            "description": "Currency of total_contribution"
+          },
+          "locale": {
+            "type": "object",
+            "nullable": true,
+            "example": "fr"
+          },
+          "donation_count": {
+            "type": "number",
+            "description": "Number of completed donations",
+            "example": 12
+          },
+          "first_donation_date": {
+            "type": "object",
+            "nullable": true,
+            "description": "Unix timestamp of first donation",
+            "example": 1672531200
+          },
+          "last_donation_date": {
+            "type": "object",
+            "nullable": true,
+            "description": "Unix timestamp of most recent donation",
+            "example": 1709856000
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Reserved for future key-value pairs",
+            "example": {}
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "updated",
+          "email",
+          "first_name",
+          "last_name",
+          "phone_number",
+          "address",
+          "donor_type",
+          "total_contribution",
+          "currency",
+          "locale",
+          "donation_count",
+          "first_donation_date",
+          "last_donation_date",
+          "metadata"
+        ]
+      },
+      "Occurrence": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "o1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "object": {
+            "type": "string",
+            "example": "occurrence",
+            "enum": [
+              "occurrence"
+            ]
+          },
+          "start": {
+            "type": "number",
+            "description": "Unix timestamp",
+            "example": 1700000000
+          },
+          "end": {
+            "type": "number",
+            "description": "Unix timestamp",
+            "example": 1700003600
+          },
+          "start_date": {
+            "type": "number",
+            "description": "Unix timestamp of start",
+            "example": 1700000000
+          },
+          "end_date": {
+            "type": "number",
+            "description": "Unix timestamp of end",
+            "example": 1700003600
+          },
+          "is_archived": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "start",
+          "end",
+          "start_date",
+          "end_date",
+          "is_archived"
+        ]
+      },
+      "Campaign": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "c1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "object": {
+            "type": "string",
+            "example": "campaign",
+            "enum": [
+              "campaign"
+            ]
+          },
+          "created": {
+            "type": "number",
+            "description": "Unix timestamp",
+            "example": 1700000000
+          },
+          "updated": {
+            "type": "number",
+            "description": "Unix timestamp of last modification",
+            "example": 1709856000
+          },
+          "deleted_at": {
+            "type": "object",
+            "nullable": true,
+            "description": "Unix timestamp of deletion, or null if active",
+            "example": null
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "donation_form",
+              "ticketing"
+            ],
+            "example": "donation_form"
+          },
+          "category": {
+            "type": "string",
+            "example": "fundraiser"
+          },
+          "status": {
+            "type": "string",
+            "example": "active"
+          },
+          "title": {
+            "type": "string",
+            "example": "Annual Gala"
+          },
+          "description": {
+            "type": "string",
+            "example": "Join us for our annual fundraising gala."
+          },
+          "locale": {
+            "type": "string",
+            "example": "en"
+          },
+          "url": {
+            "type": "object",
+            "nullable": true,
+            "example": "https://zeffy.com/en-CA/event/annual-gala-2025",
+            "description": "Public URL of the campaign page"
+          },
+          "banner_url": {
+            "type": "object",
+            "nullable": true,
+            "example": "https://res.cloudinary.com/zeffy/image/upload/banner.jpg"
+          },
+          "logo_url": {
+            "type": "object",
+            "nullable": true,
+            "example": "https://res.cloudinary.com/zeffy/image/upload/logo.png"
+          },
+          "target": {
+            "type": "object",
+            "nullable": true,
+            "description": "Fundraising target in cents",
+            "example": 100000
+          },
+          "goal_amount": {
+            "type": "object",
+            "nullable": true,
+            "description": "Fundraising goal in cents (alias for target)",
+            "example": 100000
+          },
+          "currency": {
+            "type": "string",
+            "example": "cad",
+            "description": "Currency code"
+          },
+          "volume": {
+            "type": "number",
+            "description": "Current volume in cents",
+            "example": 42000
+          },
+          "is_archived": {
+            "type": "boolean",
+            "example": false
+          },
+          "start_date": {
+            "type": "object",
+            "nullable": true,
+            "description": "Overall campaign start (Unix timestamp)",
+            "example": 1711929600
+          },
+          "end_date": {
+            "type": "object",
+            "nullable": true,
+            "description": "Overall campaign end (Unix timestamp)",
+            "example": 1712016000
+          },
+          "occurrences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Occurrence"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Reserved for future key-value pairs",
+            "example": {}
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "updated",
+          "deleted_at",
+          "type",
+          "category",
+          "status",
+          "title",
+          "description",
+          "locale",
+          "url",
+          "banner_url",
+          "logo_url",
+          "target",
+          "goal_amount",
+          "currency",
+          "volume",
+          "is_archived",
+          "start_date",
+          "end_date",
+          "occurrences",
+          "metadata"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "type",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_request_error",
+                  "authentication_error",
+                  "rate_limit_error",
+                  "api_error"
+                ],
+                "example": "invalid_request_error"
+              },
+              "code": {
+                "type": "string",
+                "example": "resource_not_found"
+              },
+              "message": {
+                "type": "string",
+                "example": "No payment found with the given id."
+              },
+              "param": {
+                "type": "string",
+                "nullable": true,
+                "example": "id"
+              },
+              "status": {
+                "type": "integer",
+                "example": 404
+              }
+            }
+          }
+        }
+      },
+      "PaymentList": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "example": "list",
+            "enum": [
+              "list"
+            ]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            }
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more results are available after this page",
+            "example": true
+          },
+          "next_cursor": {
+            "type": "object",
+            "nullable": true,
+            "description": "Cursor to pass as starting_after for the next page",
+            "example": "p1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "ContactList": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "example": "list",
+            "enum": [
+              "list"
+            ]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            }
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more results are available after this page",
+            "example": true
+          },
+          "next_cursor": {
+            "type": "object",
+            "nullable": true,
+            "description": "Cursor to pass as starting_after for the next page",
+            "example": "ct1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "CampaignList": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "example": "list",
+            "enum": [
+              "list"
+            ]
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Campaign"
+            }
+          },
+          "has_more": {
+            "type": "boolean",
+            "description": "Whether more results are available after this page",
+            "example": true
+          },
+          "next_cursor": {
+            "type": "object",
+            "nullable": true,
+            "description": "Cursor to pass as starting_after for the next page",
+            "example": "c1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          }
+        },
+        "required": [
+          "object",
+          "data",
+          "has_more",
+          "next_cursor"
+        ]
+      },
+      "PaymentCompletedEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "version",
+          "dispatchedAt",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "description": "Unique identifier for this webhook delivery"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "payment.completed"
+            ],
+            "description": "The event type"
+          },
+          "version": {
+            "type": "integer",
+            "example": 1,
+            "description": "Payload schema version"
+          },
+          "dispatchedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-01-15T14:32:00.000Z",
+            "description": "ISO 8601 timestamp of when the event was dispatched"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Payment"
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {
+    "payment.completed": {
+      "post": {
+        "summary": "Payment completed",
+        "description": "Sent when a payment is successfully processed. The `data` field contains the full payment object, identical to the `/v1/payments/:id` response.",
+        "tags": [
+          "Webhooks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentCompletedEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Return any 2xx status to acknowledge receipt. Non-2xx responses trigger retries."
+          }
+        }
+      }
+    }
+  }
+}
