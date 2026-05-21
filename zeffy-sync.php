@@ -1562,25 +1562,32 @@ function zeffy_sync_calculate_lifecycle_tags(
     bool $is_archived = false
 ): array
 {
+    // Archived campaigns considered ended.
+    if ($is_archived) {
+        return ['Ended'];
+    }
+
+    // No date information: treat active API status as ongoing.
     if ($start_date === null && $end_date === null) {
-        if (!$is_archived && strtolower($api_status) === 'active') {
+        if (strtolower($api_status) === 'active') {
             return ['Active', 'Ongoing'];
         }
         return [];
     }
 
     $now = (int) current_time('timestamp', true);
+
+    // If end date is in past, event ended.
     if ($end_date !== null && $now > $end_date) {
-        if (!$is_archived && strtolower($api_status) === 'active') {
-            return ['Active', 'Ongoing'];
-        }
         return ['Ended'];
     }
 
+    // If start date is in future, event not started yet (Active tag used for upcoming).
     if ($start_date !== null && $now < $start_date) {
         return ['Active'];
     }
 
+    // Otherwise event is currently ongoing.
     return ['Active', 'Ongoing'];
 }
 
