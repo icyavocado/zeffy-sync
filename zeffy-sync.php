@@ -1243,12 +1243,20 @@ function zeffy_sync_normalize_campaign_url(array $campaign): string
         return $source_url;
     }
 
-    $segments = array_values(array_filter(explode('/', $path), static function ($segment): bool {
-        return $segment !== '';
-    }));
-    $slug = end($segments);
-    if (!is_string($slug) || $slug === '') {
-        return $source_url;
+    // Prefer constructing canonical URL from campaign ID when available. This
+    // ensures links are stable even if the external slug changes.
+    $campaign_id = zeffy_sync_first_non_empty($campaign['event_id'] ?? null, $campaign['id'] ?? null, $campaign['campaign_id'] ?? null, $campaign['uuid'] ?? null);
+
+    if ($campaign_id !== '') {
+        $slug = $campaign_id;
+    } else {
+        $segments = array_values(array_filter(explode('/', $path), static function ($segment): bool {
+            return $segment !== '';
+        }));
+        $slug = end($segments);
+        if (!is_string($slug) || $slug === '') {
+            return $source_url;
+        }
     }
 
     $path_type = 'ticketing';
